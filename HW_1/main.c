@@ -101,7 +101,7 @@ void create_db(int connection_type)
         {
             break;
         }
-        /*TODO:parse info*/
+        /*TODO:add pid and arg info*/
         if(first)
         {
             /*get rid of head line*/
@@ -133,6 +133,124 @@ void get_connection(uint32_t all_tpye)
     }
 }
 
+static uint32_t ONEchar2dec(char *p2byte)
+{
+    return (*p2byte >= 'A') ? (10 + (*p2byte-'A')) : (*p2byte - '0');
+}
+
+static uint32_t TWOchar2dec(char *byte_1)
+{
+    uint32_t result = 0;
+    result = ONEchar2dec(byte_1);
+    result = result * 16 + ONEchar2dec(byte_1+1);
+    return result;
+}
+
+static uint32_t FOURchar2dec(char *byte_1)
+{
+    uint32_t result = 0;
+    result = TWOchar2dec(byte_1);
+    result = (result << 8) + TWOchar2dec(byte_1+2);
+    return result;
+}
+
+static void printf_hex2dec_v4(char *addr)
+{
+    char buffer[25];
+    int result[5] = {0};
+    /*get IP readable*/
+    result[0] = TWOchar2dec(addr+6);
+    result[1] = TWOchar2dec(addr+4);
+    result[2] = TWOchar2dec(addr+2);
+    result[3] = TWOchar2dec(addr+0);
+
+    /*get port readable*/
+    result[4] = FOURchar2dec(addr+9);
+
+    if(result[4] == 0)
+    {
+        snprintf(buffer,sizeof(buffer),"%d.%d.%d.%d:*",result[0],result[1],result[2],result[3]);
+    }else
+    {
+        snprintf(buffer,sizeof(buffer),"%d.%d.%d.%d:%d",result[0],result[1],result[2],result[3],result[4]);
+    }
+    printf("%-24s",buffer);
+}
+
+static void str_reverse(char *str)
+{
+    int start = 0;
+    int end = strlen(str)-1;
+    char tmp;
+    while(start < end)
+    {
+        /*swap*/
+        tmp = str[end];
+        str[end] = str[start];
+        str[start] = tmp;
+        start++;
+        end--;
+    }
+}
+
+static void dec2str(char *buffer,uint32_t num)
+{
+    int i = 0;
+    if(num == 0)
+    {
+        buffer[i++] = '0';
+        buffer[i] = '\0';
+        return;
+    }
+    while(num != 0)
+    {
+        buffer[i++] = '0' + (num % 10);
+        num /= 10;
+    }
+    buffer[i] = '\0';
+    str_reverse(buffer);
+}
+
+static void v6factory(char *buffer,uint32_t addr_frag)
+{
+    char buffer_tmp[32];
+    dec2str(buffer_tmp,addr_frag);
+    strcat(buffer,buffer_tmp);
+}
+
+static void printf_hex2dec_v6(char *addr)
+{
+    char buffer[100] = {};
+    uint32_t result[9] = {0};
+    /*get IP readable*/
+    result[0] = FOURchar2dec(addr+28);
+    result[1] = FOURchar2dec(addr+24);
+    result[2] = FOURchar2dec(addr+20);
+    result[3] = FOURchar2dec(addr+16);
+    result[4] = FOURchar2dec(addr+12);
+    result[5] = FOURchar2dec(addr+8);
+    result[6] = FOURchar2dec(addr+4);
+    result[7] = FOURchar2dec(addr+0);
+    for(int i = 0;i < 8;i++)
+    {
+        v6factory(buffer,result[i]);
+        strcat(buffer,":");
+    }
+
+    /*get port readable*/
+    result[8] = FOURchar2dec(addr+33);
+
+    if(result[8] == 0)
+    {
+        snprintf(buffer+strlen(buffer),sizeof(buffer),"*");
+    }else
+    {
+        snprintf(buffer+strlen(buffer),sizeof(buffer),"%d",result[8]);
+    }
+    printf("%-24s",buffer);
+}
+
+
 static void print_v4_info(uint32_t type)
 {
     CONNECTION_HOUSE *temp = house_head;
@@ -150,7 +268,11 @@ static void print_v4_info(uint32_t type)
     {
         if((temp->info.connection_type & TCP_v4) || (temp->info.connection_type & UDP_v4))
         {
-            printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
+            //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
+            printf("%-6s",target_type);
+            printf_hex2dec_v4(temp->info.local_addr);
+            printf_hex2dec_v4(temp->info.rem_addr);
+            printf("\n");
         }
         temp = temp->p2next;
     }
@@ -173,7 +295,11 @@ static void print_v6_info(uint32_t type)
     {
         if((temp->info.connection_type & TCP_v6) || (temp->info.connection_type & UDP_v6))
         {
-            printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
+            //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
+            printf("%-6s",target_type);
+            printf_hex2dec_v6(temp->info.local_addr);
+            printf_hex2dec_v6(temp->info.rem_addr);
+            printf("\n");
         }
         temp = temp->p2next;
     }
