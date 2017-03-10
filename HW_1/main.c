@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <dirent.h>
 
 #define IS_OUTPUTTED      0
 #define IS_NOT_OUTPUTTED  1
@@ -20,11 +21,20 @@
 char filter_string[255];
 
 typedef struct{
+    uint32_t pid;
+    char pid_env[255];/*cmd line and args*/
+}PROC_INFO;
+
+typedef struct PROC_HOUSE{
+    PROC_INFO pid_info;
+    struct PROC_HOUSE *p2next;
+}PROC_HOUSE;
+
+typedef struct{
     int connection_type;
     char local_addr[ADDR_MAX_LEN];
     char rem_addr[ADDR_MAX_LEN];
-    int pid;
-    char pid_name[255];
+    PROC_INFO *pid_info;
 }CONNECTION_INFO;
 
 typedef struct CONNECTION_HOUSE{
@@ -32,9 +42,120 @@ typedef struct CONNECTION_HOUSE{
     struct CONNECTION_HOUSE *p2next;
 }CONNECTION_HOUSE;
 
+CONNECTION_HOUSE *conn_house_head = NULL;
+CONNECTION_HOUSE *conn_house_tail = NULL;
+PROC_HOUSE *pid_house_head = NULL;
+PROC_HOUSE *pid_house_tail = NULL;
 
-CONNECTION_HOUSE *house_head = NULL;
-CONNECTION_HOUSE *house_tail = NULL;
+static void str_reverse(char *str)
+{
+    int start = 0;
+    int end = strlen(str)-1;
+    char tmp;
+    while(start < end)
+    {
+        /*swap*/
+        tmp = str[end];
+        str[end] = str[start];
+        str[start] = tmp;
+        start++;
+        end--;
+    }
+}
+
+static void dec2str(char *buffer,uint32_t num)
+{
+    int i = 0;
+    if(num == 0)
+    {
+        buffer[i++] = '0';
+        buffer[i] = '\0';
+        return;
+    }
+    while(num != 0)
+    {
+        buffer[i++] = '0' + (num % 10);
+        num /= 10;
+    }
+    buffer[i] = '\0';
+    str_reverse(buffer);
+}
+
+static uint32_t str2dec(char *str)
+{
+    uint32_t result = 0;
+    while(*str != '\0')
+    {
+        result  = result*10 + (*str - '0');
+        str++;
+    }
+    return result;
+}
+
+static void create_pid_db(char *pid)
+{
+    char buffer[255];
+    /*get pid path*/
+    snprintf(buffer,sizeof(buffer),"/proc/%d/cmdline",str2dec(pid));
+    FILE *p2file = fopen(buffer, "r");
+    size_t size_in_line = 0;
+    char *p2info= NULL;
+    ssize_t line_len = 0;
+    /*get info*/
+    line_len = getline (&p2info, &size_in_line, p2file);
+    if (line_len >= 0)
+    {
+        if(pid_house_head == NULL)
+        {
+            pid_house_head = (PROC_HOUSE*)malloc(sizeof(PROC_HOUSE));
+            pid_house_tail = pid_house_head;
+        }else
+        {
+            pid_house_tail->p2next = (PROC_HOUSE*)malloc(sizeof(PROC_HOUSE));
+            pid_house_tail = pid_house_tail->p2next;
+        }
+        pid_house_tail->p2next = NULL;
+        pid_house_tail->pid_info.pid = str2dec(pid);
+        snprintf(pid_house_tail->pid_info.pid_env,sizeof(pid_house_tail->pid_info.pid_env),"%s",p2info);
+        //printf("%d  : %s\n",pid_house_tail->pid_info.pid,pid_house_tail->pid_info.pid_env);
+    }
+    free(p2info);
+    fclose(p2file);
+}
+
+
+static void pid_factory(void)
+{
+    static int create_dir_db = 0;
+    if(create_dir_db == 0)
+    {
+        DIR *dir;
+        struct dirent *ent;
+        char dir_name[255];
+        if ((dir = opendir ("/proc")) != NULL) 
+        {
+            /* get all the files and directories within directory */
+            while ((ent = readdir (dir)) != NULL) 
+            {
+                snprintf(dir_name,sizeof(dir_name),"%s",ent->d_name);
+                /*get name with "digit" as head*/
+                if((dir_name[0]-'0' > 0) && (dir_name[0]-'0' <= 9))
+                {
+                    //printf("%s\n",dir_name);
+                    create_pid_db(dir_name);
+                }
+            }
+            closedir (dir);
+            /*only do once*/
+            create_dir_db = 1;
+        } else 
+        {
+            /* could not open directory */
+            perror ("");
+        }
+    }
+}
+
 
 static void info_parser(int connection_type,char *p2info,uint32_t type)
 {
@@ -46,21 +167,24 @@ static void info_parser(int connection_type,char *p2info,uint32_t type)
     /*get address*/
     p2local = strtok (NULL, separate_string);
     p2rem = strtok (NULL, separate_string);
-    if(house_head == NULL)
+    if(conn_house_head == NULL)
     {
-        house_head = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
-        snprintf(house_head->info.local_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2local);
-        snprintf(house_head->info.rem_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2rem);
-        house_tail = house_head;
+        conn_house_head = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
+        conn_house_tail = conn_house_head;
     }else
     {
-        house_tail->p2next = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
-        house_tail = house_tail->p2next;
-        snprintf(house_tail->info.local_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2local);
-        snprintf(house_tail->info.rem_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2rem);
+        conn_house_tail->p2next = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
+        conn_house_tail = conn_house_tail->p2next;
     }
-    house_tail->info.connection_type = type;
-    house_tail->p2next = NULL;
+    conn_house_tail->info.connection_type = type;
+        snprintf(conn_house_tail->info.local_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2local);
+        snprintf(conn_house_tail->info.rem_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2rem);
+    conn_house_tail->p2next = NULL;
+
+    /*get pid about the connection*/
+    /*TODO*/
+    uint32_t pid = 0;
+
 }
 
 void create_db(int connection_type)
@@ -93,7 +217,7 @@ void create_db(int connection_type)
     }
     FILE *p2file = fopen(p2dst, "r");
     size_t size_in_line = 0;
-    char *p2info= 0;
+    char *p2info= NULL;
     ssize_t line_len = 0;
     do {
         line_len = getline (&p2info, &size_in_line, p2file);
@@ -107,10 +231,13 @@ void create_db(int connection_type)
             /*get rid of head line*/
             line_len = getline (&p2info, &size_in_line, p2file);
             first = 0;
+            /*create pid info*/
+            pid_factory();
         }
         info_parser(connection_type,p2info,type);
     } while (!feof (p2file));
     fclose(p2file);
+    free(p2info);
 }
 
 void get_connection(uint32_t all_tpye)
@@ -177,40 +304,6 @@ static void printf_hex2dec_v4(char *addr)
     printf("%-24s",buffer);
 }
 
-static void str_reverse(char *str)
-{
-    int start = 0;
-    int end = strlen(str)-1;
-    char tmp;
-    while(start < end)
-    {
-        /*swap*/
-        tmp = str[end];
-        str[end] = str[start];
-        str[start] = tmp;
-        start++;
-        end--;
-    }
-}
-
-static void dec2str(char *buffer,uint32_t num)
-{
-    int i = 0;
-    if(num == 0)
-    {
-        buffer[i++] = '0';
-        buffer[i] = '\0';
-        return;
-    }
-    while(num != 0)
-    {
-        buffer[i++] = '0' + (num % 10);
-        num /= 10;
-    }
-    buffer[i] = '\0';
-    str_reverse(buffer);
-}
-
 static void v6factory(char *buffer,uint32_t addr_frag)
 {
     char buffer_tmp[32];
@@ -253,7 +346,7 @@ static void printf_hex2dec_v6(char *addr)
 
 static void print_v4_info(uint32_t type)
 {
-    CONNECTION_HOUSE *temp = house_head;
+    CONNECTION_HOUSE *temp = conn_house_head;
     char type_tcp[] = "tcp";
     char type_udp[] = "udp";
     char *target_type;
@@ -280,7 +373,7 @@ static void print_v4_info(uint32_t type)
 
 static void print_v6_info(uint32_t type)
 {
-    CONNECTION_HOUSE *temp = house_head;
+    CONNECTION_HOUSE *temp = conn_house_head;
     char type_tcp[] = "tcp6";
     char type_udp[] = "udp6";
     char *target_type;
