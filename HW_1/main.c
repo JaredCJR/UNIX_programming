@@ -22,6 +22,9 @@
 #define MAX_INODE_IN_PID  100
 #define UNUSED_IDX        -1
 
+#define REMOTE_ADDR       1
+#define LOCAL_ADDR        2
+
 char filter_string[255];
 
 typedef struct{
@@ -383,11 +386,19 @@ static uint32_t FOURchar2dec(char *byte_1)
 }
 
 
-static void printf_hex2dec_v4(char *addr)
+static void addr_hex2dec_v4(CONNECTION_HOUSE *conn,int type)
 {
-    char buffer[25];
+    char buffer[30];
     int result[5] = {0};
-    /*get IP readable*/
+    char *addr;
+    if(type == LOCAL_ADDR)
+    {
+        addr = conn->info.local_addr;
+    }else
+    {
+        addr = conn->info.rem_addr;
+    }
+    /*get readable local IP*/
     result[0] = TWOchar2dec(addr+6);
     result[1] = TWOchar2dec(addr+4);
     result[2] = TWOchar2dec(addr+2);
@@ -403,7 +414,14 @@ static void printf_hex2dec_v4(char *addr)
     {
         snprintf(buffer,sizeof(buffer),"%d.%d.%d.%d:%d",result[0],result[1],result[2],result[3],result[4]);
     }
-    printf("%-24s",buffer);
+    
+    if(type == LOCAL_ADDR)
+    {
+        snprintf(conn->info.local_addr,sizeof(conn->info.local_addr),"%s",buffer);
+    }else
+    {
+        snprintf(conn->info.rem_addr,sizeof(conn->info.local_addr),"%s",buffer);
+    }
 }
 
 static void v6factory(char *buffer,uint32_t addr_frag)
@@ -413,10 +431,18 @@ static void v6factory(char *buffer,uint32_t addr_frag)
     strcat(buffer,buffer_tmp);
 }
 
-static void printf_hex2dec_v6(char *addr)
+static void addr_hex2dec_v6(CONNECTION_HOUSE *conn,int type)
 {
     char buffer[100] = {};
     uint32_t result[9] = {0};
+    char *addr;
+    if(type == LOCAL_ADDR)
+    {
+        addr = conn->info.local_addr;
+    }else
+    {
+        addr = conn->info.rem_addr;
+    }
     /*get IP readable*/
     result[0] = FOURchar2dec(addr+28);
     result[1] = FOURchar2dec(addr+24);
@@ -442,7 +468,14 @@ static void printf_hex2dec_v6(char *addr)
     {
         snprintf(buffer+strlen(buffer),sizeof(buffer),"%d",result[8]);
     }
-    printf("%-24s",buffer);
+
+    if(type == LOCAL_ADDR)
+    {
+        snprintf(conn->info.local_addr,sizeof(conn->info.local_addr),"%s",buffer);
+    }else
+    {
+        snprintf(conn->info.rem_addr,sizeof(conn->info.local_addr),"%s",buffer);
+    }
 }
 
 
@@ -465,12 +498,17 @@ static void print_v4_info(uint32_t type)
         {
             //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
             printf("%-6s",target_type);
-            printf_hex2dec_v4(temp->info.local_addr);
-            printf_hex2dec_v4(temp->info.rem_addr);
+            addr_hex2dec_v4(temp,REMOTE_ADDR);
+            addr_hex2dec_v4(temp,LOCAL_ADDR);
+            printf("%-24s",temp->info.local_addr);
+            printf("%-24s",temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
             if(temp->info.pid_info != NULL)
             {
                 printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+            }else
+            {
+                printf("-");
             }
             printf("\n");
         }
@@ -497,12 +535,17 @@ static void print_v6_info(uint32_t type)
         {
             //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
             printf("%-6s",target_type);
-            printf_hex2dec_v6(temp->info.local_addr);
-            printf_hex2dec_v6(temp->info.rem_addr);
+            addr_hex2dec_v6(temp,REMOTE_ADDR);
+            addr_hex2dec_v6(temp,LOCAL_ADDR);
+            printf("%-24s",temp->info.local_addr);
+            printf("%-24s",temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
             if(temp->info.pid_info != NULL)
             {
                 printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+            }else
+            {
+                printf("-");
             }
             printf("\n");
         }
