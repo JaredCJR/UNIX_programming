@@ -113,6 +113,20 @@ static void store_inode(PROC_HOUSE *proc,uint32_t inode_num)
     }
 }
 
+/*parse until first '/' or the string head*/
+static void parse_cmdline(char *input)
+{
+    int end = strlen(input)-1;
+    for(int i = end;i >= 0;i--)
+    {
+        if(input[i] == '/')
+        {
+            snprintf(input,end-i+1,"%s",&input[i+1]);
+            return;
+        }
+    }
+}
+
 static void create_pid_db(char *pid)
 {
     char buffer[255];
@@ -138,13 +152,14 @@ static void create_pid_db(char *pid)
         pid_house_tail->p2next = NULL;
         pid_house_tail->pid_info.pid = str2dec(pid);
         pid_house_tail->pid_info.inode_num_idx = UNUSED_IDX;
+        parse_cmdline(p2info);
         snprintf(pid_house_tail->pid_info.pid_env,sizeof(pid_house_tail->pid_info.pid_env),"%s",p2info);
         //printf("%d  : %s\n",pid_house_tail->pid_info.pid,pid_house_tail->pid_info.pid_env);
     }
     free(p2info);
     fclose(p2file);
 
-    /*TODO:get inode number*/
+    /*get inode number*/
     snprintf(buffer,sizeof(buffer),"/proc/%d/fd/",str2dec(pid));
     char true_path[255];
     char fd_content[255];
@@ -232,7 +247,7 @@ void get_connection_owner(CONNECTION_HOUSE *con)
         /*next round*/
         tmp = tmp->p2next;
     }
-    fprintf(stderr,"Every connection should has a/an owner/process\n");
+    //fprintf(stderr,"DO you have root permission to access /proc filesystem?\n");
 }
 
 static void info_parser(int connection_type,char *p2info,uint32_t type)
@@ -446,14 +461,17 @@ static void print_v4_info(uint32_t type)
     }
     while(temp != NULL)
     {
-        if((temp->info.connection_type & TCP_v4) || (temp->info.connection_type & UDP_v4))
+        if(temp->info.connection_type & type)
         {
             //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
             printf("%-6s",target_type);
             printf_hex2dec_v4(temp->info.local_addr);
             printf_hex2dec_v4(temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
-            printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+            if(temp->info.pid_info->pid_env != NULL)
+            {
+                printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+            }
             printf("\n");
         }
         temp = temp->p2next;
@@ -475,19 +493,23 @@ static void print_v6_info(uint32_t type)
     }
     while(temp != NULL)
     {
-        if((temp->info.connection_type & TCP_v6) || (temp->info.connection_type & UDP_v6))
+        if(temp->info.connection_type & type)
         {
             //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
             printf("%-6s",target_type);
             printf_hex2dec_v6(temp->info.local_addr);
             printf_hex2dec_v6(temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
-            printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+            if(temp->info.pid_info->pid_env != NULL)
+            {
+                printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+            }
             printf("\n");
         }
         temp = temp->p2next;
     }
 }
+
 void print_info(uint32_t all_tpye)
 {
     if(all_tpye & TCP_v4)
@@ -516,10 +538,9 @@ int main(int argc, char *argv[])
         {"udp", no_argument, 0, OPT_RET_UDP},
     };
 
-    if(*argv[argc-1] != '-')
+    if((*argv[argc-1] != '-') && (argc > 1))
     {
         snprintf(filter_string,255,"%s",argv[argc-1]);
-        printf("filter: %s\n",filter_string);
     }
 
     int opt_ret;
