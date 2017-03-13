@@ -535,14 +535,14 @@ static void print_v4_v6_info(uint32_t type)
         if(temp->info.connection_type & type)
         {
             snprintf(buffer,sizeof(buffer),"%-6s",target_type);
-            snprintf(buffer+6,sizeof(buffer),"%-24s",temp->info.local_addr);
-            snprintf(buffer+6+24,sizeof(buffer),"%-24s",temp->info.rem_addr);
+            snprintf(buffer+6,sizeof(buffer)-6,"%-24s",temp->info.local_addr);
+            snprintf(buffer+6+24,sizeof(buffer)-6-24,"%-24s",temp->info.rem_addr);
             if(temp->info.pid_info != NULL)
             {
-                snprintf(buffer+6+24+24,sizeof(buffer),"%d/%s\n",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+                snprintf(buffer+6+24+24,sizeof(buffer)-6-24-24,"%d/%s\n",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
             }else
             {
-                snprintf(buffer+6+24+24,sizeof(buffer),"-\n");
+                snprintf(buffer+6+24+24,sizeof(buffer)-6-24-24,"-\n");
             }
             filter_factory(buffer);
         }
