@@ -34,6 +34,7 @@ typedef struct{
     int connection_type;
     char local_addr[ADDR_MAX_LEN];
     char rem_addr[ADDR_MAX_LEN];
+    uint32_t inode_num;
     PROC_INFO *pid_info;
 }CONNECTION_INFO;
 
@@ -121,11 +122,13 @@ static void create_pid_db(char *pid)
     }
     free(p2info);
     fclose(p2file);
+    /*TODO:get inode number*/
 }
 
 
 static void pid_factory(void)
 {
+    /*only need once*/
     static int create_dir_db = 0;
     if(create_dir_db == 0)
     {
@@ -156,11 +159,17 @@ static void pid_factory(void)
     }
 }
 
+/*get owner from inode num*/
+/*TODO*/
+void get_connection_owner(CONNECTION_HOUSE *con)
+{
+}
 
 static void info_parser(int connection_type,char *p2info,uint32_t type)
 {
     char *p2local;
     char *p2rem;
+    char *p2inode;
     char separate_string[] = " ";
     /*ignore list number*/
     p2local = strtok (p2info, separate_string);
@@ -176,15 +185,22 @@ static void info_parser(int connection_type,char *p2info,uint32_t type)
         conn_house_tail->p2next = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
         conn_house_tail = conn_house_tail->p2next;
     }
-    conn_house_tail->info.connection_type = type;
-        snprintf(conn_house_tail->info.local_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2local);
-        snprintf(conn_house_tail->info.rem_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2rem);
     conn_house_tail->p2next = NULL;
+    conn_house_tail->info.connection_type = type;
+    snprintf(conn_house_tail->info.local_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2local);
+    snprintf(conn_house_tail->info.rem_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2rem);
+    /*get inode number*/
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    conn_house_tail->info.inode_num = str2dec(p2inode);
 
     /*get pid about the connection*/
-    /*TODO*/
-    uint32_t pid = 0;
-
+    get_connection_owner(conn_house_tail);
 }
 
 void create_db(int connection_type)
@@ -281,6 +297,7 @@ static uint32_t FOURchar2dec(char *byte_1)
     return result;
 }
 
+
 static void printf_hex2dec_v4(char *addr)
 {
     char buffer[25];
@@ -365,6 +382,11 @@ static void print_v4_info(uint32_t type)
             printf("%-6s",target_type);
             printf_hex2dec_v4(temp->info.local_addr);
             printf_hex2dec_v4(temp->info.rem_addr);
+            //printf("inode = %d",temp->info.inode_num);
+            if(temp->info.pid_info != NULL)
+            {
+                //printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+            }
             printf("\n");
         }
         temp = temp->p2next;
@@ -392,6 +414,7 @@ static void print_v6_info(uint32_t type)
             printf("%-6s",target_type);
             printf_hex2dec_v6(temp->info.local_addr);
             printf_hex2dec_v6(temp->info.rem_addr);
+            //printf("inode = %d",temp->info.inode_num);
             printf("\n");
         }
         temp = temp->p2next;
