@@ -285,6 +285,7 @@ static void info_parser(int connection_type,char *p2info,uint32_t type)
     conn_house_tail->info.inode_num = str2dec(p2inode);
 
     /*get pid about the connection*/
+    conn_house_tail->info.pid_info = NULL;
     get_connection_owner(conn_house_tail);
 }
 
@@ -326,7 +327,6 @@ void create_db(int connection_type)
         {
             break;
         }
-        /*TODO:add pid and arg info*/
         if(first)
         {
             /*get rid of head line*/
@@ -468,7 +468,7 @@ static void print_v4_info(uint32_t type)
             printf_hex2dec_v4(temp->info.local_addr);
             printf_hex2dec_v4(temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
-            if(temp->info.pid_info->pid_env != NULL)
+            if(temp->info.pid_info != NULL)
             {
                 printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
             }
@@ -500,7 +500,7 @@ static void print_v6_info(uint32_t type)
             printf_hex2dec_v6(temp->info.local_addr);
             printf_hex2dec_v6(temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
-            if(temp->info.pid_info->pid_env != NULL)
+            if(temp->info.pid_info != NULL)
             {
                 printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
             }
