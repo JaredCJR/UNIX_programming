@@ -25,7 +25,11 @@
 #define REMOTE_ADDR       1
 #define LOCAL_ADDR        2
 
+#define FILTER_ON         1
+#define FILTER_OFF        0
+
 char filter_string[255];
+int filter_mode = FILTER_OFF;
 
 typedef struct{
     uint32_t pid;
@@ -103,6 +107,27 @@ static uint32_t str2dec(char *str)
         result  = result*10 + (*str - '0');
         str++;
     }
+    return result;
+}
+
+static uint32_t ONEchar2dec(char *p2byte)
+{
+    return (*p2byte >= 'A') ? (10 + (*p2byte-'A')) : (*p2byte - '0');
+}
+
+static uint32_t TWOchar2dec(char *byte_1)
+{
+    uint32_t result = 0;
+    result = ONEchar2dec(byte_1);
+    result = result * 16 + ONEchar2dec(byte_1+1);
+    return result;
+}
+
+static uint32_t FOURchar2dec(char *byte_1)
+{
+    uint32_t result = 0;
+    result = TWOchar2dec(byte_1);
+    result = (result << 8) + TWOchar2dec(byte_1+2);
     return result;
 }
 
@@ -253,139 +278,6 @@ void get_connection_owner(CONNECTION_HOUSE *con)
     //fprintf(stderr,"DO you have root permission to access /proc filesystem?\n");
 }
 
-static void info_parser(int connection_type,char *p2info,uint32_t type)
-{
-    char *p2local;
-    char *p2rem;
-    char *p2inode;
-    char separate_string[] = " ";
-    /*ignore list number*/
-    p2local = strtok (p2info, separate_string);
-    /*get address*/
-    p2local = strtok (NULL, separate_string);
-    p2rem = strtok (NULL, separate_string);
-    if(conn_house_head == NULL)
-    {
-        conn_house_head = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
-        conn_house_tail = conn_house_head;
-    }else
-    {
-        conn_house_tail->p2next = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
-        conn_house_tail = conn_house_tail->p2next;
-    }
-    conn_house_tail->p2next = NULL;
-    conn_house_tail->info.connection_type = type;
-    snprintf(conn_house_tail->info.local_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2local);
-    snprintf(conn_house_tail->info.rem_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2rem);
-    /*get inode number*/
-    p2inode = strtok (NULL, separate_string);
-    p2inode = strtok (NULL, separate_string);
-    p2inode = strtok (NULL, separate_string);
-    p2inode = strtok (NULL, separate_string);
-    p2inode = strtok (NULL, separate_string);
-    p2inode = strtok (NULL, separate_string);
-    p2inode = strtok (NULL, separate_string);
-    conn_house_tail->info.inode_num = str2dec(p2inode);
-
-    /*get pid about the connection*/
-    conn_house_tail->info.pid_info = NULL;
-    get_connection_owner(conn_house_tail);
-}
-
-void create_db(int connection_type)
-{
-    int first = 1;
-    char p2dst[20];
-    uint32_t type = 0;
-    switch(connection_type)
-    {
-        case TCP_v4:
-            type = TCP_v4;
-            snprintf(p2dst,20,"%s","/proc/net/tcp");
-            break;
-        case TCP_v6:
-            type = TCP_v6;
-            snprintf(p2dst,20,"%s","/proc/net/tcp6");
-            break;
-        case UDP_v4:
-            type = UDP_v4;
-            snprintf(p2dst,20,"%s","/proc/net/udp");
-            break;
-        case UDP_v6:
-            type = UDP_v6;
-            snprintf(p2dst,20,"%s","/proc/net/udp6");
-            break;
-        default:
-            fprintf(stderr,"Create db with unknown type.\n");
-            exit(EXIT_FAILURE);
-            break;
-    }
-    FILE *p2file = fopen(p2dst, "r");
-    size_t size_in_line = 0;
-    char *p2info= NULL;
-    ssize_t line_len = 0;
-    do {
-        line_len = getline (&p2info, &size_in_line, p2file);
-        if (line_len < 0)
-        {
-            break;
-        }
-        if(first)
-        {
-            /*get rid of head line*/
-            line_len = getline (&p2info, &size_in_line, p2file);
-            first = 0;
-            /*create pid info*/
-            pid_factory();
-        }
-        info_parser(connection_type,p2info,type);
-    } while (!feof (p2file));
-    fclose(p2file);
-    free(p2info);
-}
-
-void get_connection(uint32_t all_tpye)
-{
-    if(all_tpye & TCP_v4)
-    {
-        create_db(TCP_v4);
-    }
-    if(all_tpye & TCP_v6)
-    {
-        create_db(TCP_v6);
-    }
-    if(all_tpye & UDP_v4)
-    {
-        create_db(UDP_v4);
-    }
-    if(all_tpye & UDP_v6)
-    {
-        create_db(UDP_v6);
-    }
-}
-
-static uint32_t ONEchar2dec(char *p2byte)
-{
-    return (*p2byte >= 'A') ? (10 + (*p2byte-'A')) : (*p2byte - '0');
-}
-
-static uint32_t TWOchar2dec(char *byte_1)
-{
-    uint32_t result = 0;
-    result = ONEchar2dec(byte_1);
-    result = result * 16 + ONEchar2dec(byte_1+1);
-    return result;
-}
-
-static uint32_t FOURchar2dec(char *byte_1)
-{
-    uint32_t result = 0;
-    result = TWOchar2dec(byte_1);
-    result = (result << 8) + TWOchar2dec(byte_1+2);
-    return result;
-}
-
-
 static void addr_hex2dec_v4(CONNECTION_HOUSE *conn,int type)
 {
     char buffer[30];
@@ -477,81 +369,187 @@ static void addr_hex2dec_v6(CONNECTION_HOUSE *conn,int type)
         snprintf(conn->info.rem_addr,sizeof(conn->info.local_addr),"%s",buffer);
     }
 }
+static void info_parser(int connection_type,char *p2info,uint32_t type)
+{
+    char *p2local;
+    char *p2rem;
+    char *p2inode;
+    char separate_string[] = " ";
+    /*ignore list number*/
+    p2local = strtok (p2info, separate_string);
+    /*get address*/
+    p2local = strtok (NULL, separate_string);
+    p2rem = strtok (NULL, separate_string);
+    if(conn_house_head == NULL)
+    {
+        conn_house_head = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
+        conn_house_tail = conn_house_head;
+    }else
+    {
+        conn_house_tail->p2next = (CONNECTION_HOUSE*)malloc(sizeof(CONNECTION_HOUSE));
+        conn_house_tail = conn_house_tail->p2next;
+    }
+    conn_house_tail->p2next = NULL;
+    conn_house_tail->info.connection_type = type;
+    snprintf(conn_house_tail->info.local_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2local);
+    snprintf(conn_house_tail->info.rem_addr,ADDR_MAX_LEN*sizeof(char),"%s",p2rem);
+    if((connection_type & TCP_v4) || (connection_type & UDP_v4))
+    {
+        addr_hex2dec_v4(conn_house_tail,REMOTE_ADDR);
+        addr_hex2dec_v4(conn_house_tail,LOCAL_ADDR);
+    }else if((connection_type & TCP_v6) || (connection_type & UDP_v6))
+    {
+        addr_hex2dec_v6(conn_house_tail,REMOTE_ADDR);
+        addr_hex2dec_v6(conn_house_tail,LOCAL_ADDR);
+    }else
+    {
+        fprintf(stderr,"Transform to human-readable address type error!\n");
+        exit(EXIT_FAILURE);
+    }
 
+    /*get inode number*/
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    p2inode = strtok (NULL, separate_string);
+    conn_house_tail->info.inode_num = str2dec(p2inode);
 
-static void print_v4_info(uint32_t type)
+    /*get pid about the connection*/
+    conn_house_tail->info.pid_info = NULL;
+    get_connection_owner(conn_house_tail);
+}
+
+void create_db(int connection_type)
+{
+    int first = 1;
+    char p2dst[20];
+    uint32_t type = 0;
+    switch(connection_type)
+    {
+        case TCP_v4:
+            type = TCP_v4;
+            snprintf(p2dst,20,"%s","/proc/net/tcp");
+            break;
+        case TCP_v6:
+            type = TCP_v6;
+            snprintf(p2dst,20,"%s","/proc/net/tcp6");
+            break;
+        case UDP_v4:
+            type = UDP_v4;
+            snprintf(p2dst,20,"%s","/proc/net/udp");
+            break;
+        case UDP_v6:
+            type = UDP_v6;
+            snprintf(p2dst,20,"%s","/proc/net/udp6");
+            break;
+        default:
+            fprintf(stderr,"Create db with unknown type.\n");
+            exit(EXIT_FAILURE);
+            break;
+    }
+    FILE *p2file = fopen(p2dst, "r");
+    size_t size_in_line = 0;
+    char *p2info= NULL;
+    ssize_t line_len = 0;
+    do {
+        line_len = getline (&p2info, &size_in_line, p2file);
+        if (line_len < 0)
+        {
+            break;
+        }
+        if(first)
+        {
+            /*get rid of head line*/
+            line_len = getline (&p2info, &size_in_line, p2file);
+            first = 0;
+            /*create pid info*/
+            pid_factory();
+        }
+        info_parser(connection_type,p2info,type);
+    } while (!feof (p2file));
+    fclose(p2file);
+    free(p2info);
+}
+
+void get_connection(uint32_t all_tpye)
+{
+    if(all_tpye & TCP_v4)
+    {
+        create_db(TCP_v4);
+    }
+    if(all_tpye & TCP_v6)
+    {
+        create_db(TCP_v6);
+    }
+    if(all_tpye & UDP_v4)
+    {
+        create_db(UDP_v4);
+    }
+    if(all_tpye & UDP_v6)
+    {
+        create_db(UDP_v6);
+    }
+}
+
+void filter_factory(char *input)
+{
+    if(filter_mode == FILTER_ON)
+    {
+        /*target: filter_string*/
+        if(strstr(input,filter_string) == NULL)
+        {
+            return;
+        }
+    }
+    printf("%s",input);
+}
+
+static void print_v4_v6_info(uint32_t type)
 {
     CONNECTION_HOUSE *temp = conn_house_head;
+    char buffer[255];
     char type_tcp[] = "tcp";
     char type_udp[] = "udp";
+    char type_tcp6[] = "tcp6";
+    char type_udp6[] = "udp6";
     char *target_type;
     if(type == TCP_v4)
     {
         target_type = type_tcp;
-    }else
+    }else if(type == TCP_v6)
+    {
+        target_type = type_tcp6;
+    }else if(type == UDP_v4)
     {
         target_type = type_udp;
+    }else
+    {
+        target_type = type_udp6;
     }
+
     while(temp != NULL)
     {
         if(temp->info.connection_type & type)
         {
-            //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
-            printf("%-6s",target_type);
-            addr_hex2dec_v4(temp,REMOTE_ADDR);
-            addr_hex2dec_v4(temp,LOCAL_ADDR);
-            printf("%-24s",temp->info.local_addr);
-            printf("%-24s",temp->info.rem_addr);
-            //printf("inode = %d",temp->info.inode_num);
+            snprintf(buffer,sizeof(buffer),"%-6s",target_type);
+            snprintf(buffer+6,sizeof(buffer),"%-24s",temp->info.local_addr);
+            snprintf(buffer+6+24,sizeof(buffer),"%-24s",temp->info.rem_addr);
             if(temp->info.pid_info != NULL)
             {
-                printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
+                snprintf(buffer+6+24+24,sizeof(buffer),"%d/%s\n",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
             }else
             {
-                printf("-");
+                snprintf(buffer+6+24+24,sizeof(buffer),"-\n");
             }
-            printf("\n");
+            filter_factory(buffer);
         }
         temp = temp->p2next;
     }
 }
 
-static void print_v6_info(uint32_t type)
-{
-    CONNECTION_HOUSE *temp = conn_house_head;
-    char type_tcp[] = "tcp6";
-    char type_udp[] = "udp6";
-    char *target_type;
-    if(type == TCP_v6)
-    {
-        target_type = type_tcp;
-    }else
-    {
-        target_type = type_udp;
-    }
-    while(temp != NULL)
-    {
-        if(temp->info.connection_type & type)
-        {
-            //printf("%-6s%-40s%-40s\n",target_type,temp->info.local_addr,temp->info.rem_addr);
-            printf("%-6s",target_type);
-            addr_hex2dec_v6(temp,REMOTE_ADDR);
-            addr_hex2dec_v6(temp,LOCAL_ADDR);
-            printf("%-24s",temp->info.local_addr);
-            printf("%-24s",temp->info.rem_addr);
-            //printf("inode = %d",temp->info.inode_num);
-            if(temp->info.pid_info != NULL)
-            {
-                printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
-            }else
-            {
-                printf("-");
-            }
-            printf("\n");
-        }
-        temp = temp->p2next;
-    }
-}
 
 void print_info(uint32_t all_tpye)
 {
@@ -559,16 +557,16 @@ void print_info(uint32_t all_tpye)
     {
         printf("List of TCP connections:\n");
         printf("Proto Local Address           Foreign Address         PID/Program name and arguments\n");
-        print_v4_info(TCP_v4);
-        print_v6_info(TCP_v6);
+        print_v4_v6_info(TCP_v4);
+        print_v4_v6_info(TCP_v6);
         printf("\n");
     }
     if(all_tpye & UDP_v4)
     {
         printf("List of UDP connections:\n");
         printf("Proto Local Address           Foreign Address         PID/Program name and arguments\n");
-        print_v4_info(UDP_v4);
-        print_v6_info(UDP_v6);
+        print_v4_v6_info(UDP_v4);
+        print_v4_v6_info(UDP_v6);
         printf("\n");
     }
 }
@@ -580,10 +578,12 @@ int main(int argc, char *argv[])
         {"tcp", no_argument, 0, OPT_RET_TCP},
         {"udp", no_argument, 0, OPT_RET_UDP},
     };
+    filter_mode = FILTER_OFF;
 
     if((*argv[argc-1] != '-') && (argc > 1))
     {
         snprintf(filter_string,255,"%s",argv[argc-1]);
+        filter_mode = FILTER_ON;
     }
 
     int opt_ret;
