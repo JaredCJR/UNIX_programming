@@ -1,6 +1,6 @@
 CC := gcc
-#CFLAGS := -O2 -std=gnu99 -Wall -Werror -c
-CFLAGS := -O0 -g3 -std=gnu99 -Wall -c
+CFLAGS := -O2 -std=gnu99 -Wall -c
+#CFLAGS := -O0 -g3 -std=gnu99 -Wall -c
 LFLAGS := -o
 
 TARGET := hw1
