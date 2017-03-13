@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <dirent.h>
+#include <unistd.h>
 
 #define IS_OUTPUTTED      0
 #define IS_NOT_OUTPUTTED  1
@@ -18,10 +19,15 @@
 #define UDP_v4            (uint32_t)0x0004
 #define UDP_v6            (uint32_t)0x0008
 
+#define MAX_INODE_IN_PID  100
+#define UNUSED_IDX        -1
+
 char filter_string[255];
 
 typedef struct{
     uint32_t pid;
+    uint32_t inode_num[MAX_INODE_IN_PID];
+    int inode_num_idx;
     char pid_env[255];/*cmd line and args*/
 }PROC_INFO;
 
@@ -87,10 +93,24 @@ static uint32_t str2dec(char *str)
     uint32_t result = 0;
     while(*str != '\0')
     {
+        if((*str > '9') || (*str < '0'))
+        {
+            break;
+        }
         result  = result*10 + (*str - '0');
         str++;
     }
     return result;
+}
+
+static void store_inode(PROC_HOUSE *proc,uint32_t inode_num)
+{
+    proc->pid_info.inode_num_idx++;
+    proc->pid_info.inode_num[proc->pid_info.inode_num_idx] = inode_num;
+    if(proc->pid_info.inode_num_idx >= MAX_INODE_IN_PID)
+    {
+        fprintf(stderr,"inode is too much for the storage\n");
+    }
 }
 
 static void create_pid_db(char *pid)
@@ -117,12 +137,47 @@ static void create_pid_db(char *pid)
         }
         pid_house_tail->p2next = NULL;
         pid_house_tail->pid_info.pid = str2dec(pid);
+        pid_house_tail->pid_info.inode_num_idx = UNUSED_IDX;
         snprintf(pid_house_tail->pid_info.pid_env,sizeof(pid_house_tail->pid_info.pid_env),"%s",p2info);
         //printf("%d  : %s\n",pid_house_tail->pid_info.pid,pid_house_tail->pid_info.pid_env);
     }
     free(p2info);
     fclose(p2file);
+
     /*TODO:get inode number*/
+    snprintf(buffer,sizeof(buffer),"/proc/%d/fd/",str2dec(pid));
+    char true_path[255];
+    char fd_content[255];
+    DIR *dir;
+    struct dirent *ent;
+    uint32_t inode_num;
+    if ((dir = opendir (buffer)) != NULL) 
+    {
+        /* get all the files and directories within directory */
+        while ((ent = readdir (dir)) != NULL) 
+        {
+            snprintf(true_path,sizeof(true_path),"%s%s",buffer,ent->d_name);
+            memset(fd_content,0,sizeof(fd_content));
+            if (readlink(true_path,fd_content,sizeof(fd_content)) >= 0)
+            {
+                /*we are looking for inode string, such as socket:[46683] */
+                if((strlen(fd_content) > 9)&&(strncmp(fd_content,"socket:[",8) == 0))
+                {
+                    inode_num = str2dec(fd_content+8);
+                    //printf("%d\n",inode_num);
+                    store_inode(pid_house_tail,inode_num);
+                }
+            }else
+            {
+                /*ignore those are not linking info*/
+            }
+        }
+        closedir (dir);
+    } else 
+    {
+        /* could not open directory */
+        perror ("");
+    }
 }
 
 
@@ -160,9 +215,24 @@ static void pid_factory(void)
 }
 
 /*get owner from inode num*/
-/*TODO*/
 void get_connection_owner(CONNECTION_HOUSE *con)
 {
+    uint32_t target_inode = con->info.inode_num;
+    PROC_HOUSE *tmp = pid_house_head;
+    while(tmp != NULL)
+    {
+        for(int i = 0;i <= tmp->pid_info.inode_num_idx;i++)
+        {
+            if(tmp->pid_info.inode_num[i] == target_inode)
+            {
+                con->info.pid_info = &tmp->pid_info;
+                return;
+            }
+        }
+        /*next round*/
+        tmp = tmp->p2next;
+    }
+    fprintf(stderr,"Every connection should has a/an owner/process\n");
 }
 
 static void info_parser(int connection_type,char *p2info,uint32_t type)
@@ -383,10 +453,7 @@ static void print_v4_info(uint32_t type)
             printf_hex2dec_v4(temp->info.local_addr);
             printf_hex2dec_v4(temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
-            if(temp->info.pid_info != NULL)
-            {
-                //printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
-            }
+            printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
             printf("\n");
         }
         temp = temp->p2next;
@@ -415,6 +482,7 @@ static void print_v6_info(uint32_t type)
             printf_hex2dec_v6(temp->info.local_addr);
             printf_hex2dec_v6(temp->info.rem_addr);
             //printf("inode = %d",temp->info.inode_num);
+            printf("%d/%s",temp->info.pid_info->pid,temp->info.pid_info->pid_env);
             printf("\n");
         }
         temp = temp->p2next;
