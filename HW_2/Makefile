@@ -14,12 +14,14 @@ all:$(TARGET)
 run:$(TARGET)
 	LD_PRELOAD=./inject.so ./hw2_test
 
+gdb:$(TARGET)
+	LD_PRELOAD=./inject.so gdbtui ./hw2_test
 
 hw2_test:$(TEST_SOURCE)
 	$(CC) $(CFLAGS) $^ -o $@
 
 inject.so:inject.c
-	$(CC) -o $@ $(INJECT_FLAGS) $< -ldl
+	$(CC) -g -o $@ $(INJECT_FLAGS) $< -ldl
 
 
 
