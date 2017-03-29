@@ -1,9 +1,10 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/types.h>
+#include "src/test_func.h"
+
 
 int main() {
-	printf("UID = %d\n", getuid());
+    /*test*/
+    __get_uid();
+    __fputc();
 	return 0;
 }
 
