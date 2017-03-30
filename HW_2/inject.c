@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <grp.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <fcntl.h>
@@ -8,6 +9,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <stdarg.h>
+#include <pwd.h>
 
 
 #ifndef __O_TMPFILE
@@ -110,6 +112,11 @@ static int (*old_mkfifo)(const char *pathname, mode_t mode) = NULL;
 static int (*old_stat)(const char *restrict path, struct stat *restrict buf) = NULL;
 static mode_t (*old_umask)(mode_t cmask) = NULL;
 
+static  __attribute__((constructor)) void Initializetion()
+{    
+    printf("Hello Injection\n");
+#define OUTPUT_LOC stderr
+}
 
 #define get_old_name(name) old_ ## name
 
@@ -136,6 +143,15 @@ static mode_t (*old_umask)(mode_t cmask) = NULL;
     } \
 }while(0)
 
+#define get_ret_old_func(orig_name,ret_type,...)  \
+    ret_type RES; \
+	if(get_old_name(orig_name) != NULL) { \
+	    RES = get_old_name(orig_name)(__VA_ARGS__); \
+	}else \
+    { \
+        fprintf(stderr,"Get original library call error!\n"); \
+    } 
+
 #define exec_old_func(orig_name,...)  do{ \
 	if(get_old_name(orig_name) != NULL) { \
 	    get_old_name(orig_name)(__VA_ARGS__); \
@@ -150,20 +166,44 @@ static mode_t (*old_umask)(mode_t cmask) = NULL;
     return_old_func(orig_name,__VA_ARGS__); \
 }while(0)
 
+#define GET_ORIG_RET(orig_name,ret_type,...) \
+    get_old_func(orig_name); \
+    get_ret_old_func(orig_name,ret_type,__VA_ARGS__) \
+
 #define get_orig_and_nonret(orig_name,...) do{\
     get_old_func(orig_name); \
     exec_old_func(orig_name,__VA_ARGS__); \
 }while(0)
 
-static  __attribute__((constructor)) void Initializetion()
-{    
-        printf("Hello Injection\n");
+//for FILE name
+char fpath[1024];
+char fname[1024];
+
+static void get_file_path(FILE *stream)
+{   
+    int fd = fileno(stream); 
+    /* Read out the link to our file descriptor. */
+    sprintf(fpath, "/proc/self/fd/%d", fd);
+    memset(fname, 0, sizeof(fname));
+    get_old_func(readlink);
+    old_readlink(fpath, fname, sizeof(fname)-1);
 }
+
+static void get_fd_path(int fd)
+{   
+    /* Read out the link to our file descriptor. */
+    sprintf(fpath, "/proc/self/fd/%d", fd);
+    memset(fname, 0, sizeof(fname));
+    get_old_func(readlink);
+    old_readlink(fpath, fname, sizeof(fname)-1);
+}
+
 
 uid_t getuid(void)
 {
-    get_orig_and_ret(getuid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(getuid,uid_t);
+    fprintf(OUTPUT_LOC,"[monitor] getuid()=%s\n",getpwuid(RES)->pw_name);
+    return RES;
 }
 
 int fputc(int character, FILE * stream )
@@ -172,50 +212,76 @@ int fputc(int character, FILE * stream )
     return EXIT_FAILURE;
 }
 
-int closedir(DIR *dirp)
-{
-    get_orig_and_ret(closedir,dirp);
-    return EXIT_FAILURE;
-}
-
-DIR *fdopendir(int fd)
-{
-    get_orig_and_ret(fdopendir,fd);
-    return NULL;
-}
-
-DIR *opendir(const char *name)
-{
-    get_orig_and_ret(opendir,name);
-    return NULL;
-}
-
 struct dirent *readdir(DIR *dirp)
 {
-    get_orig_and_ret(readdir,dirp);
-    return NULL;
+    GET_ORIG_RET(readdir,struct dirent *,dirp);
+    if(RES != NULL)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] readdir(%p)=%s\n",dirp,RES->d_name);
+    }
+    return RES;
 }
 
 int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result)
 {
-    get_orig_and_ret(readdir_r,dirp,entry,result);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(readdir_r,int,dirp,entry,result);
+    if(entry != NULL)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] readdir_r(%p, %s,%p) = %d\n",dirp,entry->d_name,result,RES);
+    }
+    return RES;
 }
+
+int closedir(DIR *dirp)
+{
+    GET_ORIG_RET(closedir,int,dirp);
+    if(dirp != NULL)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] closedir(%p)=%d\n",dirp,RES);
+    }
+    return RES;
+}
+
+DIR *fdopendir(int fd)
+{
+    GET_ORIG_RET(fdopendir,DIR *,fd);
+    get_old_func(readdir);
+    if(RES != NULL)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] fdopendir(%d)=%s\n",fd,old_readdir(RES)->d_name);
+    }
+    return RES;
+}
+
+DIR *opendir(const char *name)
+{
+    GET_ORIG_RET(opendir,DIR *,name);
+    fprintf(OUTPUT_LOC,"[monitor] opendir(\"%s\")=%p \n",name,RES);
+    return RES;
+}
+
 
 void rewinddir(DIR *dirp)
 {
-    get_orig_and_ret(rewinddir,dirp);
+    get_orig_and_nonret(rewinddir,dirp);
+    get_old_func(readdir);
+    if(dirp!=NULL)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] rewinddir(\"%s\")\n",old_readdir(dirp)->d_name);
+    }
 }
 
 void seekdir(DIR *dirp, long loc)
 {
-    get_orig_and_ret(seekdir,dirp,loc);
+    get_orig_and_nonret(seekdir,dirp,loc);
+    fprintf(OUTPUT_LOC,"[monitor] seekdir(%p,%ld)\n",dirp,loc);
 }
 
 long telldir(DIR *dirp)
 {
-    get_orig_and_ret(telldir,dirp);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(telldir,long,dirp);
+    fprintf(OUTPUT_LOC,"[monitor] telldir(%p) = %ld\n",dirp,RES);
+    return RES;
 }
 
 int creat(const char *pathname, mode_t mode)
@@ -243,56 +309,73 @@ int open(const char *path, int oflag, ...)
 
 int fclose(FILE *stream)
 {
-    get_orig_and_ret(fclose,stream);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(fclose,int,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fclose(\"%s\") = %d\n",fname,RES);
+    return RES;
 }
 
 FILE *fdopen(int fd, const char *mode)
 {
-    get_orig_and_ret(fdopen,fd,mode);
-    return NULL;
+    GET_ORIG_RET(fdopen,FILE *,fd,mode);
+    get_fd_path(fd);
+    fprintf(OUTPUT_LOC,"[monitor] fdopen(\"%s\",%s) = %s\n",fname,mode,fname);
+    return RES;
 }
 
 int fflush(FILE *stream)
 {
-    get_orig_and_ret(fflush,stream);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(fflush,int,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fflush(\"%s\") = %d\n",fname,RES);
+    return RES;
 }
 
 int fgetc(FILE *stream)
 {
-    get_orig_and_ret(fgetc,stream);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(fgetc,int,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fgetc(\"%s\") = %d\n",fname,RES);
+    return RES;
 }
 
 char *fgets(char *s, int size, FILE *stream)
 {
-    get_orig_and_ret(fgets,s,size,stream);
-    return NULL;
+    get_file_path(stream);
+    GET_ORIG_RET(fgets,char *,s,size,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fgets(%s,%d,\"%s\") = %s\n",s,size,fname,RES);
+    return RES;
 }
 
 FILE *fopen(const char *path, const char *mode)
 {
-    get_orig_and_ret(fopen,path,mode);
-    return NULL;
+    GET_ORIG_RET(fopen,FILE *,path,mode);
+    fprintf(OUTPUT_LOC,"[monitor] fopen(\"%s\",%s) = %s\n",path,mode,path);
+    return RES;
 }
 
 int fputs(const char *s, FILE *stream)
 {
-    get_orig_and_ret(fputs,s,stream);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(fputs,int,s,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fputs(%s,\"%s\") = %d\n",s,fname,RES);
+    return RES;
 }
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
-    get_orig_and_ret(fread,ptr,size,nmemb,stream);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(fread,size_t,ptr,size,nmemb,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fread(%p,%lu,%lu,\"%s\") = %lu\n",ptr,size,nmemb,fname,RES);
+    return RES;
 }
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb,FILE *stream)
 {
-    get_orig_and_ret(fwrite,ptr,size,nmemb,stream);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(fwrite,size_t,ptr,size,nmemb,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fwrite(%p,%lu,%lu,\"%s\") = %lu\n",ptr,size,nmemb,fname,RES);
+    return RES;
 }
 
 int remove(const char *pathname)
@@ -310,12 +393,16 @@ int rename(const char *old, const char *new)
 void setbuf(FILE *stream, char *buf)
 {
     get_orig_and_ret(setbuf,stream,buf);
+    get_file_path(stream);
+    fprintf(OUTPUT_LOC,"[monitor] setbuf(\"%s\",%s)\n",fname,buf);
 }
 
 int setvbuf(FILE *stream, char *buf, int mode, size_t size)
 {
-    get_orig_and_ret(setvbuf,stream,buf,mode,size);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(setvbuf,int,stream,buf,mode,size);
+    fprintf(OUTPUT_LOC,"[monitor] setvbuf(\"%s\",%s,%d,%lu) = %d\n",fname,buf,mode,size,RES);
+    return RES;
 }
 
 char *tempnam(const char *dir, const char *pfx)
@@ -326,8 +413,10 @@ char *tempnam(const char *dir, const char *pfx)
 
 FILE *tmpfile(void)
 {
-    get_orig_and_ret(tmpfile);
-    return NULL;
+    GET_ORIG_RET(tmpfile,FILE *);
+    get_file_path(RES);
+    fprintf(OUTPUT_LOC,"[monitor] tmpfile() = \n",fname);
+    return RES;
 }
 
 char *tmpnam(char *s)
@@ -571,20 +660,23 @@ char *getcwd(char *buf, size_t size)
 
 gid_t getegid(void)
 {
-    get_orig_and_ret(getegid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(getegid,gid_t);
+    fprintf(OUTPUT_LOC,"[monitor] getegid() = %s\n",getgrgid(RES)->gr_name);
+    return RES;
 }
 
 uid_t geteuid(void)
 {
-    get_orig_and_ret(geteuid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(geteuid,uid_t);
+    fprintf(OUTPUT_LOC,"[monitor] geteuid() = %s\n",getpwuid(RES)->pw_name);
+    return RES;
 }
 
 gid_t getgid(void)
 {
-    get_orig_and_ret(getgid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(getgid,gid_t);
+    fprintf(OUTPUT_LOC,"[monitor] getgid() = %s\n",getgrgid(RES)->gr_name);
+    return RES;
 }
 
 int link(const char *path1, const char *path2)
@@ -631,26 +723,30 @@ int rmdir(const char *path)
 
 int setegid(gid_t gid)
 {
-    get_orig_and_ret(setegid,gid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(setegid,int,gid);
+    fprintf(OUTPUT_LOC,"[monitor] setegid(%s) = %d\n",getgrgid(RES)->gr_name,RES);
+    return RES;
 }
 
 int seteuid(uid_t uid)
 {
-    get_orig_and_ret(seteuid,uid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(seteuid,int,uid);
+    fprintf(OUTPUT_LOC,"[monitor] seteuid(%s)\n",getpwuid(uid)->pw_name,RES);
+    return RES;
 }
 
 int setgid(gid_t gid)
 {
-    get_orig_and_ret(setgid,gid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(setegid,int,gid);
+    fprintf(OUTPUT_LOC,"[monitor] setgid(%s) = %d\n",getgrgid(RES)->gr_name,RES);
+    return RES;
 }
 
 int setuid(uid_t uid)
 {
-    get_orig_and_ret(setuid,uid);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(setuid,int,uid);
+    fprintf(OUTPUT_LOC,"[monitor] setuid(%s) = %d\n",getpwuid(uid)->pw_name,RES);
+    return RES;
 }
 
 unsigned int sleep(unsigned int seconds)
@@ -691,14 +787,16 @@ int fchmod(int fildes, mode_t mode)
 
 int fstat(int fildes, struct stat *buf)
 {
-    get_orig_and_ret(fstat,fildes,buf);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(fstat,int,fildes,buf);
+    fprintf(OUTPUT_LOC,"[monitor] fstat(%d,type and permission(st_mode)=0x%.8X, size=%d bytes) = %d\n",fildes,buf->st_mode,(int)buf->st_size,RES);
+    return RES;
 }
 
 int lstat(const char *restrict path, struct stat *restrict buf)
 {
-    get_orig_and_ret(lstat,path,buf);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(lstat,int,path,buf);
+    fprintf(OUTPUT_LOC,"[monitor] lstat(%s,type and permission(st_mode)=0x%.8X, size=%d bytes) = %d\n",path,buf->st_mode,(int)buf->st_size,RES);
+    return RES;
 }
 
 int mkdir(const char *path, mode_t mode)
@@ -715,8 +813,17 @@ int mkfifo(const char *pathname, mode_t mode)
 
 int stat(const char *restrict path, struct stat *restrict buf)
 {
-    get_orig_and_ret(stat,path,buf);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(stat,int,path,buf);
+    fprintf(OUTPUT_LOC,"[monitor] stat(%s,type and permission(st_mode)=0x%.8X, size=%d bytes) = %d\n",path,buf->st_mode,(int)buf->st_size,RES);
+    return RES;
+}
+
+static int (*old___lxstat)(int ver, const char * path, struct stat * stat_buf);
+int __lxstat(int ver, const char * path, struct stat * stat_buf)
+{
+    GET_ORIG_RET(__lxstat,int,ver,path,stat_buf);
+    fprintf(OUTPUT_LOC,"[monitor] __lxstat(%d,%s,type and permission(st_mode)=0x%.8X, size=%d bytes) = %d\n",ver,path,stat_buf->st_mode,(int)stat_buf->st_size,RES);
+    return RES;
 }
 
 mode_t umask(mode_t cmask)
