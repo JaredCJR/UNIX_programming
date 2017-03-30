@@ -101,6 +101,14 @@ static unsigned int (*old_sleep)(unsigned int seconds) = NULL;
 static int (*old_symlink)(const char *path1, const char *path2) = NULL;
 static int (*old_unlink)(const char *path) = NULL;
 static ssize_t (*old_write)(int fildes, const void *buf, size_t nbyte) = NULL;
+static int (*old_chmod)(const char *path, mode_t mode) = NULL;
+static int (*old_fchmod)(int fildes, mode_t mode) = NULL;
+static int (*old_fstat)(int fildes, struct stat *buf) = NULL;
+static int (*old_lstat)(const char *restrict path, struct stat *restrict buf) = NULL;
+static int (*old_mkdir)(const char *path, mode_t mode) = NULL;
+static int (*old_mkfifo)(const char *pathname, mode_t mode) = NULL;
+static int (*old_stat)(const char *restrict path, struct stat *restrict buf) = NULL;
+static mode_t (*old_umask)(mode_t cmask) = NULL;
 
 
 #define get_old_name(name) old_ ## name
@@ -128,11 +136,29 @@ static ssize_t (*old_write)(int fildes, const void *buf, size_t nbyte) = NULL;
     } \
 }while(0)
 
+#define exec_old_func(orig_name,...)  do{ \
+	if(get_old_name(orig_name) != NULL) { \
+	    get_old_name(orig_name)(__VA_ARGS__); \
+	}else \
+    { \
+        fprintf(stderr,"Get original library call error!\n"); \
+    } \
+}while(0)
+
 #define get_orig_and_ret(orig_name,...) do{\
     get_old_func(orig_name); \
     return_old_func(orig_name,__VA_ARGS__); \
 }while(0)
 
+#define get_orig_and_nonret(orig_name,...) do{\
+    get_old_func(orig_name); \
+    exec_old_func(orig_name,__VA_ARGS__); \
+}while(0)
+
+static  __attribute__((constructor)) void Initializetion()
+{    
+        printf("Hello Injection\n");
+}
 
 uid_t getuid(void)
 {
@@ -318,7 +344,7 @@ void *calloc(size_t nmemb, size_t size)
 
 void exit(int status)
 {
-    get_orig_and_ret(exit,status);
+    get_orig_and_nonret(exit,status);
 }
 
 void free(void *ptr)
@@ -427,7 +453,7 @@ int dup2(int fildes, int fildes2)
 
 void _exit(int status)
 {
-    get_orig_and_ret(_exit,status);
+    get_orig_and_nonret(_exit,status);
 }
 
 int execl(const char *path, const char *arg, ...)
@@ -644,3 +670,53 @@ ssize_t write(int fildes, const void *buf, size_t nbyte)
     get_orig_and_ret(write,fildes,buf,nbyte);
     return EXIT_FAILURE;
 }
+
+int chmod(const char *path, mode_t mode)
+{
+    get_orig_and_ret(chmod,path,mode);
+    return EXIT_FAILURE;
+}
+
+int fchmod(int fildes, mode_t mode)
+{
+    get_orig_and_ret(fchmod,fildes,mode);
+    return EXIT_FAILURE;
+}
+
+int fstat(int fildes, struct stat *buf)
+{
+    get_orig_and_ret(fstat,fildes,buf);
+    return EXIT_FAILURE;
+}
+
+int lstat(const char *restrict path, struct stat *restrict buf)
+{
+    get_orig_and_ret(lstat,path,buf);
+    return EXIT_FAILURE;
+}
+
+int mkdir(const char *path, mode_t mode)
+{
+    get_orig_and_ret(mkdir,path,mode);
+    return EXIT_FAILURE;
+}
+
+int mkfifo(const char *pathname, mode_t mode)
+{
+    get_orig_and_ret(mkfifo,pathname,mode);
+    return EXIT_FAILURE;
+}
+
+int stat(const char *restrict path, struct stat *restrict buf)
+{
+    get_orig_and_ret(stat,path,buf);
+    return EXIT_FAILURE;
+}
+
+mode_t umask(mode_t cmask)
+{
+    get_orig_and_ret(umask,cmask);
+    return EXIT_FAILURE;
+}
+
+
