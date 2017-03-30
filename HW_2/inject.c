@@ -336,10 +336,31 @@ char *tmpnam(char *s)
     return NULL;
 }
 
+void *malloc(size_t size)
+{
+    old_malloc = dlsym(RTLD_NEXT, "malloc");
+    if(old_malloc == NULL)
+    {
+        fprintf(stderr, "Error in `dlsym`: %s\n", dlerror());
+    }
+    return old_malloc(size);
+}
+
+static void* temporary_calloc(size_t x, size_t y)
+{
+    return NULL;
+}
+
 void *calloc(size_t nmemb, size_t size)
 {
-    get_orig_and_ret(calloc,nmemb,size);
-    return NULL;
+    if(!old_calloc)
+    {
+        //dlsym will use calloc,so use a NULL to cheat it.
+        //http://blog.bigpixel.ro/2010/09/interposing-calloc-on-linux/
+        old_calloc = temporary_calloc;
+        old_calloc = (void *(*)(size_t, size_t)) dlsym(RTLD_NEXT, "calloc");
+    }
+    return old_calloc(nmemb,size);
 }
 
 void exit(int status)
@@ -358,15 +379,6 @@ char *getenv(const char *name)
     return NULL;
 }
 
-void *malloc(size_t size)
-{
-    old_malloc = dlsym(RTLD_NEXT, "malloc");
-    if(old_malloc == NULL)
-    {
-        fprintf(stderr, "Error in `dlsym`: %s\n", dlerror());
-    }
-    return old_malloc(size);
-}
 
 char *mkdtemp(char *template)
 {
@@ -474,7 +486,7 @@ int execl(const char *path, const char *arg, ...)
 int execle(const char *path, const char *arg, ...)
 {
     char *args[20];
-    char *envs[20];
+    char **envs;
     int i = 0;
     va_list List;
     va_start(List, arg);
@@ -483,12 +495,7 @@ int execle(const char *path, const char *arg, ...)
         i++;
     }
     args[i] = NULL;
-    i = 0;
-    while((envs[i] = va_arg(List,char *)) != NULL)
-    {
-        i++;
-    }
-    envs[i] = NULL;
+    envs = va_arg(List,char **);
     get_orig_and_ret(execvpe, path, args, envs);
     return EXIT_FAILURE;
 }
@@ -579,7 +586,6 @@ gid_t getgid(void)
     get_orig_and_ret(getgid);
     return EXIT_FAILURE;
 }
-
 
 int link(const char *path1, const char *path2)
 {
@@ -718,5 +724,3 @@ mode_t umask(mode_t cmask)
     get_orig_and_ret(umask,cmask);
     return EXIT_FAILURE;
 }
-
-
