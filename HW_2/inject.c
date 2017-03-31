@@ -208,8 +208,10 @@ uid_t getuid(void)
 
 int fputc(int character, FILE * stream )
 {
-    get_orig_and_ret(fputc,character,stream);
-    return EXIT_FAILURE;
+    get_file_path(stream);
+    GET_ORIG_RET(fputc,int,character,stream);
+    fprintf(OUTPUT_LOC,"[monitor] fputc(%d,\"%s\") = %d\n",character,fname,RES);
+    return RES;
 }
 
 struct dirent *readdir(DIR *dirp)
@@ -286,8 +288,9 @@ long telldir(DIR *dirp)
 
 int creat(const char *pathname, mode_t mode)
 {
-    get_orig_and_ret(creat,pathname,mode);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(creat,int,pathname,mode);
+    fprintf(OUTPUT_LOC,"[monitor] creat(%s,%d)=%d\n",pathname,mode,RES);
+    return RES;
 }
 
 int open(const char *path, int oflag, ...)
@@ -295,14 +298,18 @@ int open(const char *path, int oflag, ...)
     // Mode will be ignore in these case.
     if( !( oflag & (O_CREAT | O_TMPFILE) ) )
     {
-        get_orig_and_ret(open,path,oflag);
+        GET_ORIG_RET(open,int,path,oflag);
+        fprintf(OUTPUT_LOC,"[monitor] open(%s,%d)=%d\n",path,oflag,RES);
+        return RES;
     }else
     {
 	    mode_t Mode;
         va_list List;
         va_start(List, oflag);
         Mode = va_arg(List, mode_t);
-        get_orig_and_ret(open,path,oflag, Mode);
+        GET_ORIG_RET(open,int,path,oflag,Mode);
+        fprintf(OUTPUT_LOC,"[monitor] open(%s,%d,%d)=%d\n",path,oflag,Mode,RES);
+        return RES;
     }
     return EXIT_FAILURE;
 }
@@ -380,14 +387,16 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb,FILE *stream)
 
 int remove(const char *pathname)
 {
-    get_orig_and_ret(remove,pathname);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(remove,int,pathname);
+    fprintf(OUTPUT_LOC,"[monitor] remove(%s) = %d\n",pathname,RES);
+    return RES;
 }
 
 int rename(const char *old, const char *new)
 {
-    get_orig_and_ret(rename,old,new);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(rename,int,old,new);
+    fprintf(OUTPUT_LOC,"[monitor] rename(%s,%s) = %d\n",old,new,RES);
+    return RES;
 }
 
 void setbuf(FILE *stream, char *buf)
@@ -407,22 +416,24 @@ int setvbuf(FILE *stream, char *buf, int mode, size_t size)
 
 char *tempnam(const char *dir, const char *pfx)
 {
-    get_orig_and_ret(tempnam,dir,pfx);
-    return NULL;
+    GET_ORIG_RET(tempnam,char *,dir,pfx);
+    fprintf(OUTPUT_LOC,"[monitor] tempnam(%s,%s) = %s\n",dir,pfx,RES);
+    return RES;
 }
 
 FILE *tmpfile(void)
 {
     GET_ORIG_RET(tmpfile,FILE *);
     get_file_path(RES);
-    fprintf(OUTPUT_LOC,"[monitor] tmpfile() = \n",fname);
+    fprintf(OUTPUT_LOC,"[monitor] tmpfile() = %s\n",fname);
     return RES;
 }
 
 char *tmpnam(char *s)
 {
-    get_orig_and_ret(tmpnam,s);
-    return NULL;
+    GET_ORIG_RET(tmpnam,char *,s);
+    fprintf(OUTPUT_LOC,"[monitor] tmpnam(%s) = %s\n",s,RES);
+    return RES;
 }
 
 void *malloc(size_t size)
@@ -432,7 +443,9 @@ void *malloc(size_t size)
     {
         fprintf(stderr, "Error in `dlsym`: %s\n", dlerror());
     }
-    return old_malloc(size);
+    void *p = old_malloc(size);
+    fprintf(OUTPUT_LOC,"[monitor] malloc(%lu) = %p\n",size,p);
+    return p;
 }
 
 static void* temporary_calloc(size_t x, size_t y)
@@ -449,111 +462,131 @@ void *calloc(size_t nmemb, size_t size)
         old_calloc = temporary_calloc;
         old_calloc = (void *(*)(size_t, size_t)) dlsym(RTLD_NEXT, "calloc");
     }
-    return old_calloc(nmemb,size);
+    void *p = old_calloc(nmemb,size);
+    fprintf(OUTPUT_LOC,"[monitor] calloc(%lu,%lu) = %p\n",nmemb,size,p);
+    return p;
 }
 
 void exit(int status)
 {
+    fprintf(OUTPUT_LOC,"[monitor] exit(%d)\n",status);
     get_orig_and_nonret(exit,status);
 }
 
 void free(void *ptr)
 {
+    fprintf(OUTPUT_LOC,"[monitor] free(%p)\n",ptr);
     get_orig_and_ret(free,ptr);
 }
 
 char *getenv(const char *name)
 {
-    get_orig_and_ret(getenv,name);
-    return NULL;
+    GET_ORIG_RET(getenv,char *,name);
+    fprintf(OUTPUT_LOC,"[monitor] getenv(%s) = %s\n",name,RES);
+    return RES;
 }
 
 
 char *mkdtemp(char *template)
 {
-    get_orig_and_ret(mkdtemp,template);
-    return NULL;
+    GET_ORIG_RET(mkdtemp,char *,template);
+    fprintf(OUTPUT_LOC,"[monitor] mkdtemp(%s) = %s\n",template,RES);
+    return RES;
 }
 
 int mkstemp(char *template)
 {
-    get_orig_and_ret(mkstemp,template);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(mkstemp,int,template);
+    fprintf(OUTPUT_LOC,"[monitor] mkstemp(%s) = %d\n",template,RES);
+    return RES;
 }
 
 int putenv(char *string)
 {
-    get_orig_and_ret(putenv,string);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(putenv,int,string);
+    fprintf(OUTPUT_LOC,"[monitor] putenv(%s) = %d\n",string,RES);
+    return RES;
 }
 
 int rand(void)
 {
-    get_orig_and_ret(rand);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(rand,int);
+    fprintf(OUTPUT_LOC,"[monitor] rand() = %d\n",RES);
+    return RES;
 }
 
 int rand_r(unsigned int *seedp)
 {
-    get_orig_and_ret(rand_r,seedp);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(rand_r,int,seedp);
+    fprintf(OUTPUT_LOC,"[monitor] rand_r(%p) = %d\n",seedp,RES);
+    return RES;
 }
 
 void *realloc(void *ptr, size_t size)
 {
-    get_orig_and_ret(realloc,ptr,size);
-    return NULL;
+    GET_ORIG_RET(realloc,void *,ptr,size);
+    fprintf(OUTPUT_LOC,"[monitor] realloc(%p,%lu) = %p\n",ptr,size,RES);
+    return RES;
 }
 
 int setenv(const char *name, const char *value, int overwrite)
 {
-    get_orig_and_ret(setenv,name,value,overwrite);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(setenv,int,name,value,overwrite);
+    fprintf(OUTPUT_LOC,"[monitor] setenv(%s,%s,%d) = %d\n",name,value,overwrite,RES);
+    return RES;
 }
 
 void srand(unsigned int seed)
 {
-    get_orig_and_ret(srand,seed);
+    get_orig_and_nonret(srand,seed);
+    fprintf(OUTPUT_LOC,"[monitor] srand(%d)\n",seed);
 }
 
 int system(const char *command)
 {
-    get_orig_and_ret(system,command);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(system,int,command);
+    fprintf(OUTPUT_LOC,"[monitor] system(%s) = %d\n",command,RES);
+    return RES;
 }
 
 int chdir(const char *path)
 {
-    get_orig_and_ret(chdir,path);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(chdir,int,path);
+    fprintf(OUTPUT_LOC,"[monitor] chdir(%s) = %d\n",path,RES);
+    return RES;
 }
 
 int chown(const char *path, uid_t owner, gid_t group)
 {
-    get_orig_and_ret(chown,path,owner,group);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(chown,int,path,owner,group);
+    fprintf(OUTPUT_LOC,"[monitor] chown(%s,%d,%d) = %d\n",path,owner,group,RES);
+    return RES;
 }
 
 int close(int fildes)
 {
-    get_orig_and_ret(close,fildes);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(close,int,fildes);
+    fprintf(OUTPUT_LOC,"[monitor] close(%d) = %d\n",fildes,RES);
+    return RES;
 }
 
 int dup(int fildes)
 {
-    get_orig_and_ret(dup,fildes);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(dup,int,fildes);
+    fprintf(OUTPUT_LOC,"[monitor] dup(%d) = %d\n",fildes,RES);
+    return RES;
 }
 
 int dup2(int fildes, int fildes2)
 {
-    get_orig_and_ret(dup2,fildes,fildes2);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(dup2,int,fildes,fildes2);
+    fprintf(OUTPUT_LOC,"[monitor] dup2(%d,%d) = %d\n",fildes,fildes2,RES);
+    return RES;
 }
 
 void _exit(int status)
 {
+    fprintf(OUTPUT_LOC,"[monitor] _exit(%d)\n",status);
     get_orig_and_nonret(_exit,status);
 }
 
@@ -568,8 +601,9 @@ int execl(const char *path, const char *arg, ...)
         i++;
     }
     args[i] = NULL;
-    get_orig_and_ret(execv, path, args);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(execv,int,path,args);
+    fprintf(OUTPUT_LOC,"[monitor] execl(%s,%s,...) = %d\n",path,arg,RES);
+    return RES;
 }
 
 int execle(const char *path, const char *arg, ...)
@@ -585,8 +619,9 @@ int execle(const char *path, const char *arg, ...)
     }
     args[i] = NULL;
     envs = va_arg(List,char **);
-    get_orig_and_ret(execvpe, path, args, envs);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(execvpe,int,path,args,envs);
+    fprintf(OUTPUT_LOC,"[monitor] execle(%s,%s,%s...) = %d\n",path,arg,envs[0],RES);
+    return RES;
 }
 
 int execlp(const char *file, const char *arg, ...)
@@ -600,25 +635,32 @@ int execlp(const char *file, const char *arg, ...)
         i++;
     }
     args[i] = NULL;
-    get_orig_and_ret(execvp, file, args);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(execvp,int,file,args);
+    fprintf(OUTPUT_LOC,"[monitor] execlp(%s,%s,...) = %d\n",file,arg,RES);
+    return RES;
 }
+
 int execv(const char *path, char *const argv[])
 {
-    get_orig_and_ret(execv,path,argv);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(execv,int,path,argv);
+    fprintf(OUTPUT_LOC,"[monitor] execv(%s,%s...) = %d\n",path,argv[0],RES);
+    return RES;
 }
 
 int execve(const char *path, char *const argv[], char *const envp[])
 {
-    get_orig_and_ret(execve,path,argv,envp);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(execve,int,path,argv,envp);
+    fprintf(OUTPUT_LOC,"[monitor] execve(%s,%s...,%s...) = %d\n",path,argv[0],envp[0],RES);
+    return RES;
 }
 
 int execvp(const char *file, char *const argv[])
 {
     get_orig_and_ret(execvp,file,argv);
     return EXIT_FAILURE;
+    GET_ORIG_RET(execvp,int,file,argv);
+    fprintf(OUTPUT_LOC,"[monitor] execvp(%s,%s...) = %d\n",file,argv[0],RES);
+    return RES;
 }
 
 int fchdir(int fildes)
@@ -731,7 +773,7 @@ int setegid(gid_t gid)
 int seteuid(uid_t uid)
 {
     GET_ORIG_RET(seteuid,int,uid);
-    fprintf(OUTPUT_LOC,"[monitor] seteuid(%s)\n",getpwuid(uid)->pw_name,RES);
+    fprintf(OUTPUT_LOC,"[monitor] seteuid(%s) = %d\n",getpwuid(uid)->pw_name,RES);
     return RES;
 }
 
