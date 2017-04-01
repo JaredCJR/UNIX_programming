@@ -10,6 +10,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <pwd.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 
 #ifndef __O_TMPFILE
@@ -23,6 +25,9 @@
 #ifndef EXIT_FAILURE
 	#define EXIT_FAILURE 1
 #endif
+
+#define monitor_MAGIC 12
+static uint32_t call_count = 0;
 
 static int (*old_fputc)( int character, FILE * stream ) = NULL;
 static int (*old_closedir)(DIR *dirp) = NULL;
@@ -112,11 +117,6 @@ static int (*old_mkfifo)(const char *pathname, mode_t mode) = NULL;
 static int (*old_stat)(const char *restrict path, struct stat *restrict buf) = NULL;
 static mode_t (*old_umask)(mode_t cmask) = NULL;
 
-static  __attribute__((constructor)) void Initializetion()
-{    
-    printf("Hello Injection\n");
-#define OUTPUT_LOC stderr
-}
 
 #define get_old_name(name) old_ ## name
 
@@ -134,19 +134,19 @@ static  __attribute__((constructor)) void Initializetion()
 
 #define get_old_func(orig_name) __get_old_func(get_old_name(orig_name),orig_name)
 
-#define return_old_func(orig_name,...)  do{ \
-	if(get_old_name(orig_name) != NULL) { \
-	    return get_old_name(orig_name)(__VA_ARGS__); \
-	}else \
-    { \
-        fprintf(stderr,"Get original library call error!\n"); \
-    } \
-}while(0)
-
 #define get_ret_old_func(orig_name,ret_type,...)  \
     ret_type RES; \
 	if(get_old_name(orig_name) != NULL) { \
 	    RES = get_old_name(orig_name)(__VA_ARGS__); \
+	}else \
+    { \
+        fprintf(stderr,"Get original library call error!\n"); \
+    } 
+
+#define get_ret_old_func2(orig_name,ret_type,...)  \
+    ret_type RES2; \
+	if(get_old_name(orig_name) != NULL) { \
+	    RES2 = get_old_name(orig_name)(__VA_ARGS__); \
 	}else \
     { \
         fprintf(stderr,"Get original library call error!\n"); \
@@ -161,19 +161,50 @@ static  __attribute__((constructor)) void Initializetion()
     } \
 }while(0)
 
-#define get_orig_and_ret(orig_name,...) do{\
-    get_old_func(orig_name); \
-    return_old_func(orig_name,__VA_ARGS__); \
-}while(0)
 
 #define GET_ORIG_RET(orig_name,ret_type,...) \
     get_old_func(orig_name); \
     get_ret_old_func(orig_name,ret_type,__VA_ARGS__) \
+    call_count++;
+
+#define GET_ORIG_RET2(orig_name,ret_type,...) \
+    get_old_func(orig_name); \
+    get_ret_old_func2(orig_name,ret_type,__VA_ARGS__) \
+    call_count++;
 
 #define get_orig_and_nonret(orig_name,...) do{\
     get_old_func(orig_name); \
     exec_old_func(orig_name,__VA_ARGS__); \
+    call_count++; \
 }while(0)
+
+#define OUTPUT_LOC stderr
+FILE *pFile = NULL;
+static  __attribute__((constructor)) void Initializetion()
+{    
+    GET_ORIG_RET(getenv,const char *,"MONITOR_OUTPUT");
+    //const char* env = getenv("MONITOR_OUTPUT");
+    if((RES == NULL) || (strcmp("stderr",RES)==0))
+    {
+        /*do nothing*/
+    }else
+    {
+        /*replace stderr with specific file*/
+        GET_ORIG_RET2(fopen,FILE *,RES,"w");
+        //pFile = fopen(RES,"w");
+        pFile = RES2;
+        get_orig_and_nonret(dup2,fileno(pFile),fileno(stderr));
+        //dup2(fileno(pFile),fileno(stderr));
+    }
+}
+
+static  __attribute__((destructor)) void Finalize()
+{
+    if(pFile != NULL)
+    {
+        fclose(pFile);
+    }
+}
 
 //for FILE name
 char fpath[1024];
@@ -318,7 +349,10 @@ int fclose(FILE *stream)
 {
     get_file_path(stream);
     GET_ORIG_RET(fclose,int,stream);
-    fprintf(OUTPUT_LOC,"[monitor] fclose(\"%s\") = %d\n",fname,RES);
+    if(call_count > monitor_MAGIC)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] fclose(\"%s\") = %d\n",fname,RES);
+    }
     return RES;
 }
 
@@ -401,7 +435,7 @@ int rename(const char *old, const char *new)
 
 void setbuf(FILE *stream, char *buf)
 {
-    get_orig_and_ret(setbuf,stream,buf);
+    get_orig_and_nonret(setbuf,stream,buf);
     get_file_path(stream);
     fprintf(OUTPUT_LOC,"[monitor] setbuf(\"%s\",%s)\n",fname,buf);
 }
@@ -444,7 +478,11 @@ void *malloc(size_t size)
         fprintf(stderr, "Error in `dlsym`: %s\n", dlerror());
     }
     void *p = old_malloc(size);
-    fprintf(OUTPUT_LOC,"[monitor] malloc(%lu) = %p\n",size,p);
+    if(call_count > monitor_MAGIC)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] malloc(%lu) = %p\n",size,p);
+    }
+    call_count++;
     return p;
 }
 
@@ -463,7 +501,11 @@ void *calloc(size_t nmemb, size_t size)
         old_calloc = (void *(*)(size_t, size_t)) dlsym(RTLD_NEXT, "calloc");
     }
     void *p = old_calloc(nmemb,size);
-    fprintf(OUTPUT_LOC,"[monitor] calloc(%lu,%lu) = %p\n",nmemb,size,p);
+    if(call_count > monitor_MAGIC)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] calloc(%lu,%lu) = %p\n",nmemb,size,p);
+    }
+    call_count++;
     return p;
 }
 
@@ -475,8 +517,11 @@ void exit(int status)
 
 void free(void *ptr)
 {
-    fprintf(OUTPUT_LOC,"[monitor] free(%p)\n",ptr);
-    get_orig_and_ret(free,ptr);
+    get_orig_and_nonret(free,ptr);
+    if(call_count > monitor_MAGIC)
+    {
+        fprintf(OUTPUT_LOC,"[monitor] free(%p)\n",ptr);
+    }
 }
 
 char *getenv(const char *name)

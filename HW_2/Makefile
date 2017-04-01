@@ -26,4 +26,4 @@ inject.so:inject.c
 
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) monitor.out
