@@ -656,8 +656,6 @@ int execve(const char *path, char *const argv[], char *const envp[])
 
 int execvp(const char *file, char *const argv[])
 {
-    get_orig_and_ret(execvp,file,argv);
-    return EXIT_FAILURE;
     GET_ORIG_RET(execvp,int,file,argv);
     fprintf(OUTPUT_LOC,"[monitor] execvp(%s,%s...) = %d\n",file,argv[0],RES);
     return RES;
@@ -665,39 +663,45 @@ int execvp(const char *file, char *const argv[])
 
 int fchdir(int fildes)
 {
-    get_orig_and_ret(fchdir,fildes);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(fchdir,int,fildes);
+    fprintf(OUTPUT_LOC,"[monitor] fchdir(%d) = %d\n",fildes,RES);
+    return RES;
 }
 
 int fchown(int fildes, uid_t owner, gid_t group)
 {
-    get_orig_and_ret(fchown,fildes,owner,group);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(fchown,int,fildes,owner,group);
+    fprintf(OUTPUT_LOC,"[monitor] fchown(%d,%d,%d) = %d\n",fildes,owner,group,RES);
+    return RES;
 }
 
 pid_t fork(void)
 {
-    get_orig_and_ret(fork);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(fork,pid_t);
+    fprintf(OUTPUT_LOC,"[monitor] fork() = %d\n",RES);
+    return RES;
 }
 
 int fsync(int fildes)
 {
-    get_orig_and_ret(fsync,fildes);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(fork,pid_t);
+    fprintf(OUTPUT_LOC,"[monitor] fsync(%d) = %d\n",fildes,RES);
+    return RES;
 }
 
 int ftruncate(int fildes, off_t length)
 {
-    get_orig_and_ret(ftruncate,fildes,length);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(ftruncate,int,fildes,length);
+    fprintf(OUTPUT_LOC,"[monitor] ftruncate(%d,%ld) = %d\n",fildes,length,RES);
+    return RES;
 }
 
 
 char *getcwd(char *buf, size_t size)
 {
-    get_orig_and_ret(getcwd,buf,size);
-    return NULL;
+    GET_ORIG_RET(getcwd,char *,buf,size);
+    fprintf(OUTPUT_LOC,"[monitor] getcwd(%s,%lu) = %s\n",buf,size,RES);
+    return RES;
 }
 
 gid_t getegid(void)
@@ -723,44 +727,51 @@ gid_t getgid(void)
 
 int link(const char *path1, const char *path2)
 {
-    get_orig_and_ret(link,path1,path2);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(link,int,path1,path2);
+    fprintf(OUTPUT_LOC,"[monitor] link(%s,%s) = %d\n",path1,path2,RES);
+    return RES;
 }
 
 int pipe(int fildes[2])
 {
-    get_orig_and_ret(pipe,fildes);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(pipe,int,fildes);
+    fprintf(OUTPUT_LOC,"[monitor] pipe(%p) = %d\n",fildes,RES);
+    return RES;
 }
 
 ssize_t pread(int fildes, void *buf, size_t nbyte, off_t offset)
 {
-    get_orig_and_ret(pread,fildes,buf,nbyte,offset);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(pread,int,fildes,buf,nbyte,offset);
+    fprintf(OUTPUT_LOC,"[monitor] pread(%d,%p,%lu,%lu) = %d\n",fildes,buf,nbyte,offset,RES);
+    return RES;
 }
 
 ssize_t pwrite(int fildes, const void *buf, size_t nbyte,off_t offset)
 {
-    get_orig_and_ret(pwrite,fildes,buf,nbyte,offset);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(pwrite,ssize_t,fildes,buf,nbyte,offset);
+    fprintf(OUTPUT_LOC,"[monitor] pwrite(%d,%p,%lu,%lu) = %ld\n",fildes,buf,nbyte,offset,RES);
+    return RES;
 }
 
 ssize_t read(int fildes, void *buf, size_t nbyte)
 {
-    get_orig_and_ret(read,fildes,buf,nbyte);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(read,ssize_t,fildes,buf,nbyte);
+    fprintf(OUTPUT_LOC,"[monitor] read(%d,%p,%lu) = %ld\n",fildes,buf,nbyte,RES);
+    return RES;
 }
 
 ssize_t readlink(const char *restrict path, char *restrict buf,size_t bufsize)
 {
-    get_orig_and_ret(readlink,path,buf,bufsize);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(readlink,ssize_t,path,buf,bufsize);
+    fprintf(OUTPUT_LOC,"[monitor] readlink(%s,%s,%lu) = %ld\n",path,buf,bufsize,RES);
+    return RES;
 }
 
 int rmdir(const char *path)
 {
-    get_orig_and_ret(rmdir,path);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(rmdir,int,path);
+    fprintf(OUTPUT_LOC,"[monitor] rmdir(%s) = %d\n",path,RES);
+    return RES;
 }
 
 int setegid(gid_t gid)
@@ -793,38 +804,44 @@ int setuid(uid_t uid)
 
 unsigned int sleep(unsigned int seconds)
 {
-    get_orig_and_ret(sleep,seconds);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(sleep,unsigned int,seconds);
+    fprintf(OUTPUT_LOC,"[monitor] sleep(%d) = %d\n",seconds,RES);
+    return RES;
 }
 
 int symlink(const char *path1, const char *path2)
 {
-    get_orig_and_ret(symlink,path1,path2);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(symlink,int,path1,path2);
+    fprintf(OUTPUT_LOC,"[monitor] symlink(%s,%s) = %d\n",path1,path2,RES);
+    return RES;
 }
 
 int unlink(const char *path)
 {
-    get_orig_and_ret(unlink,path);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(unlink,int,path);
+    fprintf(OUTPUT_LOC,"[monitor] unlink(%s) = %d\n",path,RES);
+    return RES;
 }
 
 ssize_t write(int fildes, const void *buf, size_t nbyte)
 {
-    get_orig_and_ret(write,fildes,buf,nbyte);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(write,int,fildes,buf,nbyte);
+    fprintf(OUTPUT_LOC,"[monitor] write(%d,%p,%lu) = %d\n",fildes,buf,nbyte,RES);
+    return RES;
 }
 
 int chmod(const char *path, mode_t mode)
 {
-    get_orig_and_ret(chmod,path,mode);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(chmod,int,path,mode);
+    fprintf(OUTPUT_LOC,"[monitor] chmod(%s,%d) = %d\n",path,mode,RES);
+    return RES;
 }
 
 int fchmod(int fildes, mode_t mode)
 {
-    get_orig_and_ret(fchmod,fildes,mode);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(fchmod,int,fildes,mode);
+    fprintf(OUTPUT_LOC,"[monitor] fchmod(%d,%d) = %d\n",fildes,mode,RES);
+    return RES;
 }
 
 int fstat(int fildes, struct stat *buf)
@@ -843,14 +860,16 @@ int lstat(const char *restrict path, struct stat *restrict buf)
 
 int mkdir(const char *path, mode_t mode)
 {
-    get_orig_and_ret(mkdir,path,mode);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(mkdir,int,path,mode);
+    fprintf(OUTPUT_LOC,"[monitor] mkdir(%s,%d) = %d\n",path,mode,RES);
+    return RES;
 }
 
 int mkfifo(const char *pathname, mode_t mode)
 {
-    get_orig_and_ret(mkfifo,pathname,mode);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(mkfifo,int,pathname,mode);
+    fprintf(OUTPUT_LOC,"[monitor] mkfifo(%s,%d) = %d\n",pathname,mode,RES);
+    return RES;
 }
 
 int stat(const char *restrict path, struct stat *restrict buf)
@@ -870,6 +889,7 @@ int __lxstat(int ver, const char * path, struct stat * stat_buf)
 
 mode_t umask(mode_t cmask)
 {
-    get_orig_and_ret(umask,cmask);
-    return EXIT_FAILURE;
+    GET_ORIG_RET(umask,mode_t,cmask);
+    fprintf(OUTPUT_LOC,"[monitor] umask(%d) = %d\n",cmask,RES);
+    return RES;
 }
