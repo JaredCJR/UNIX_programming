@@ -116,7 +116,12 @@ static int (*old_mkdir)(const char *path, mode_t mode) = NULL;
 static int (*old_mkfifo)(const char *pathname, mode_t mode) = NULL;
 static int (*old_stat)(const char *restrict path, struct stat *restrict buf) = NULL;
 static mode_t (*old_umask)(mode_t cmask) = NULL;
-
+/*More monitored api*/
+static int (*old_putchar)(int in) = NULL;
+static int (*old_puts)(const char *in) = NULL;
+static long (*old_ftell)(FILE *in) = NULL;
+static int (*old_ungetc)(int in1, FILE * in2) = NULL;
+static pid_t (*old_vfork)(void) = NULL;
 
 #define get_old_name(name) old_ ## name
 
@@ -936,5 +941,42 @@ mode_t umask(mode_t cmask)
 {
     GET_ORIG_RET(umask,mode_t,cmask);
     fprintf(OUTPUT_LOC,"[monitor] umask(%d) = %d\n",cmask,RES);
+    return RES;
+}
+/*More monitored api*/
+int putchar(int in)
+{
+    GET_ORIG_RET(putchar,int,in);
+    fprintf(OUTPUT_LOC,"[monitor] putchar(%d) = %d\n",in,RES);
+    return RES;
+}
+
+int puts(const char *in)
+{
+    GET_ORIG_RET(puts,int,in);
+    fprintf(OUTPUT_LOC,"[monitor] puts(%s) = %d\n",in,RES);
+    return RES;
+}
+
+long ftell(FILE *in)
+{
+    GET_ORIG_RET(ftell,long,in);
+    get_file_path(in);
+    fprintf(OUTPUT_LOC,"[monitor] ftell(%s) = %ld\n",fname,RES);
+    return RES;
+}
+
+int ungetc(int in1, FILE *in2)
+{
+    GET_ORIG_RET(ungetc,int,in1,in2);
+    get_file_path(in2);
+    fprintf(OUTPUT_LOC,"[monitor] ungetc(%d,%s) = %d\n",in1,fname,RES);
+    return RES;
+}
+
+pid_t vfork(void)
+{
+    GET_ORIG_RET(vfork,int);
+    fprintf(OUTPUT_LOC,"[monitor] vfork() = %d\n",RES);
     return RES;
 }
