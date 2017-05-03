@@ -15,13 +15,40 @@ int REDIRECT_OUT = 0;
 char filename_in[1024];
 char filename_out[1024];
 
+int setpgid_ok = 0;
+pid_t shell_pid;
+volatile int core_dump = 0;
+
+int orig_sigint_handler;
+int orig_sigquit_handler;
+
 void sig_handler(int signo)
 {
     if (signo == SIGINT)//looks for ctrl-c which has a value of 2
     {
+        if(getpid() != shell_pid)
+        {
+            signal(SIGINT,orig_sigint_handler);
+            raise(signo);
+        }
     }
     else if (signo == SIGQUIT)//looks for ctrl-\ which has a value of 9
     {
+        if(getpid() != shell_pid)
+        {
+            signal(SIGQUIT,orig_sigquit_handler);
+            core_dump = 1;
+            raise(signo);
+        }
+    }else if(signo == SIGCHLD)
+    {
+        /*
+        if((getpid() == shell_pid) && core_dump)
+        {
+            core_dump = 0;
+            printf("Quit (core dumped)\n");
+        }
+        */
     }
 }
 
@@ -60,6 +87,7 @@ static void split(char *cmd,int *argc,char *argv[MAX_ARGC])
     }
 }
 
+
 static void run(char *cmd)
 {
     REDIRECT_IN = 0;
@@ -78,6 +106,7 @@ static void run(char *cmd)
         return;
     }
     int pid = -1;
+    setpgid_ok = 0;
     if((pid = fork()) == 0)//child
     {
         int fd_in;
@@ -95,12 +124,6 @@ static void run(char *cmd)
 
         if(execvp(argv_store[0], argv_store) == -1)
         {
-            /*
-            for(int i = 0;i < argc_store;i++)
-            {
-                printf("%d:%s\n",i,argv_store[i]);
-            }
-            */
             if(REDIRECT_IN)
             {
                 close(fd_in);
@@ -123,17 +146,26 @@ static void run(char *cmd)
         REDIRECT_IN = 0;
         REDIRECT_OUT = 0;
     }
+    //parent
+    int gid = pid;
+    /*TODO:setup foreground/background pg*/
+    //setpgid(pid,gid);
     int status;
-    waitpid(pid, &status, 0);//parent
+    while(waitpid(pid, &status, WNOHANG) <= 0)
+    {
+    }
+    
 }
 
 int main(void)
 {
 	/*Catch SIGNAL*/
-    if (signal(SIGINT, sig_handler) == SIG_ERR)
+    if ((orig_sigint_handler = signal(SIGINT, sig_handler)) == SIG_ERR)
         printf("\ncan't catch SIGINT\n");
-    if (signal(SIGQUIT, sig_handler) == SIG_ERR)
+    if ((orig_sigquit_handler = signal(SIGQUIT, sig_handler)) == SIG_ERR)
         printf("\ncan't catch SIGQUIT\n");
+    if (signal(SIGCHLD, sig_handler) == SIG_ERR)
+        printf("\ncan't catch SIGCHLD\n");
 
 
     size_t buf_len = 1024;
@@ -143,6 +175,7 @@ int main(void)
         perror("Unable to allocate buffer");
         exit(1);
     }
+    shell_pid = getpid();
     while(1)
     {
         printf("shell-prompt$ ");
