@@ -11,12 +11,22 @@
 #define MAX_ARGC       64
 #define MAX_PIPE_NUM   10
 
+typedef struct{
+    int in;
+    int out;
+}PIPE_MAP;
+
+#define PIPE_IN_FD   0
+#define PIPE_OUT_FD  1
+
 int REDIRECT_IN = 0;
 int REDIRECT_OUT = 0;
 char filename_in[1024];
 char filename_out[1024];
+pid_t pid_array[MAX_PIPE_NUM] = {-1};
 
 pid_t shell_pid;
+int parse_end = 0;
 volatile int core_dump = 0;
 
 int orig_sigint_handler;
@@ -69,14 +79,18 @@ static void redirect_output(char *fname)
  * 0:non-pipe_mode
  * others: cmd offset for pipe mode
  */
-static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
+static int parser(char *cmd,int *argc,char *argv[MAX_ARGC], PIPE_MAP *pipe_map,int is_pipe_in)
 {
-    const char* deli = " \n";
+    const char* deli = " \n\r";
     argv[*argc = 0] = strtok(cmd, deli);
     (*argc)++;
     if(argv[0] == NULL)
     {
-        return;
+        return 0;
+    }
+    if(is_pipe_in)
+    {
+        pipe_map->in = 1;
     }
     while ((argv[*argc] = strtok(NULL, deli)) != NULL)
     {
@@ -94,13 +108,38 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
         }
         if(strcmp(argv[*argc],"|") == 0)
         {
-            int offset = argv[*argc] - cmd + 2;
+            int offset = argv[*argc] - cmd + 2;//addition 1 for strtok()'s '\0'
             argv[*argc] = NULL;//clear "|"
+            pipe_map->out = 1;
+            parse_end = 0;
             return offset;
         }
         (*argc)++;
     }
     return 0;
+}
+
+static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC],int is_last)
+{
+    pid_t pid;
+    if ((pid = fork ()) == 0)
+    {
+        if(fd_in != STDIN_FILENO)
+        {
+            dup2(fd_in,STDIN_FILENO);
+            close(fd_in);
+        }
+        if(fd_out != STDOUT_FILENO)
+        {
+            dup2(fd_out,STDOUT_FILENO);
+            close(fd_out);
+        }
+        if(execvp(argv_store[0], argv_store) == -1)
+        {
+            fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[0],errno);
+            _exit(EXIT_FAILURE); // If child fails
+        }
+    }
 }
 
 
@@ -110,65 +149,64 @@ static void run(char *cmd)
     REDIRECT_OUT = 0;
     int argc_store[MAX_PIPE_NUM];
     char *argv_store[MAX_PIPE_NUM][MAX_ARGC];
-    pid_t pid_array[MAX_PIPE_NUM] = {-1};
+    PIPE_MAP pipes_map[MAX_PIPE_NUM] = {{0,0}};
     int cmd_idx = 0;
     int cmd_offset = 0;
-    while(cmd_offset = parser(cmd+cmd_offset, &argc_store[cmd_idx], argv_store[cmd_idx]))
+    int is_pipe_in = 0;
+    parse_end = 0;
+    while(cmd_offset += parser(cmd+cmd_offset, &argc_store[cmd_idx], argv_store[cmd_idx],&pipes_map[cmd_idx],is_pipe_in))
     {
         /*Managing multiple commands relative variable*/
-        if(argc_store[cmd_idx] == 0)
+        if(argc_store[cmd_idx] == 0 || parse_end)
         {
-            cmd_idx--;
             break;
         }
+        parse_end = 1;
+        is_pipe_in = pipes_map[cmd_idx].out ? 1 : 0;
         cmd_idx++;
     }
-    for(int i = 0;i <= cmd_idx;i++)
+    /*fork pipeline*/
+    int pipe_fd[2];
+    int in = STDIN_FILENO;
+    for(int i = 0;i < cmd_idx;i++)//the last command should output to the original STDOUT_FILENO
     {
-        if((pid_array[i] = fork()) == 0)//child
+        pipe(pipe_fd);
+        sub_command(in,pipe_fd[PIPE_OUT_FD],argv_store[i],cmd_idx == i);
+        close(pipe_fd[PIPE_OUT_FD]);
+        in = pipe_fd[PIPE_IN_FD];
+    }
+    //last command
+    int pid;
+    int fd_in;
+    int fd_out;
+    if ((pid = fork ()) == 0)
+    {
+        if(in != STDIN_FILENO)
         {
-            int fd_in;
-            int fd_out;
-            if(REDIRECT_IN)
-            {
-                fd_in = open(filename_in, O_RDONLY);
-                dup2(fd_in, STDIN_FILENO);
-            }
-            if(REDIRECT_OUT)
-            {
-                fd_out = open(filename_out, O_WRONLY | O_CREAT, 0666);
-                dup2(fd_out, STDOUT_FILENO);
-            }
-            if(execvp(argv_store[i][0], argv_store[i]) == -1)
-            {
-                if(REDIRECT_IN)
-                {
-                    close(fd_in);
-                }
-                if(REDIRECT_OUT)
-                {
-                    close(fd_out);
-                }
-                fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[i][0],errno);
-                _exit(EXIT_FAILURE); // If child fails
-            }
-            if(REDIRECT_IN)
-            {
-                close(fd_in);
-            }
-            if(REDIRECT_OUT)
-            {
-                close(fd_out);
-            }
-            REDIRECT_IN = 0;
-            REDIRECT_OUT = 0;
+            dup2(in, STDIN_FILENO);
+            close(in);
         }
-        //parent
-        int status;
-        while(waitpid(pid_array[i], &status, WNOHANG) <= 0)
+        if(REDIRECT_IN)
         {
+            fd_in = open(filename_in, O_RDONLY);
+            dup2(fd_in, STDIN_FILENO);
+            close(fd_in);
         }
-        
+        if(REDIRECT_OUT)
+        {
+            fd_out = open(filename_out, O_WRONLY | O_CREAT, 0666);
+            dup2(fd_out, STDOUT_FILENO);
+            close(fd_out);
+        }
+        if(execvp(argv_store[cmd_idx][0], argv_store) == -1)
+        {
+            fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[cmd_idx][0],errno);
+            _exit(EXIT_FAILURE); // If child fails
+        }
+    }
+    int status;
+    while(waitpid(pid, &status, WNOHANG) <= 0)
+    {
     }
     //parent
     //TODO:setup foreground/background pg
