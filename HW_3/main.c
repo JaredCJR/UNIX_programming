@@ -9,13 +9,13 @@
 #include <fcntl.h>
 
 #define MAX_ARGC       64
+#define MAX_PIPE_NUM   10
 
 int REDIRECT_IN = 0;
 int REDIRECT_OUT = 0;
 char filename_in[1024];
 char filename_out[1024];
 
-int setpgid_ok = 0;
 pid_t shell_pid;
 volatile int core_dump = 0;
 
@@ -64,27 +64,43 @@ static void redirect_output(char *fname)
     REDIRECT_OUT = 1;
 }
 
-static void split(char *cmd,int *argc,char *argv[MAX_ARGC])
+/*
+ * return value:
+ * 0:non-pipe_mode
+ * others: cmd offset for pipe mode
+ */
+static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
 {
     const char* deli = " \n";
     argv[*argc = 0] = strtok(cmd, deli);
+    (*argc)++;
     if(argv[0] == NULL)
     {
         return;
     }
-    while ((argv[++(*argc)] = strtok(NULL, deli)) != NULL)
+    while ((argv[*argc] = strtok(NULL, deli)) != NULL)
     {
         if(strcmp(argv[*argc],"<") == 0)
         {
-            argv[(*argc)--] = NULL;//clear "<"
+            argv[*argc] = NULL;//clear "<"
             redirect_input(strtok(NULL, deli));
+            return 0;
         }
         if(strcmp(argv[*argc],">") == 0)
         {
-            argv[(*argc)--] = NULL;//clear ">"
+            argv[*argc] = NULL;//clear ">"
             redirect_output(strtok(NULL, deli));
+            return 0;
         }
+        if(strcmp(argv[*argc],"|") == 0)
+        {
+            int offset = argv[*argc] - cmd + 2;
+            argv[*argc] = NULL;//clear "|"
+            return offset;
+        }
+        (*argc)++;
     }
+    return 0;
 }
 
 
@@ -92,38 +108,50 @@ static void run(char *cmd)
 {
     REDIRECT_IN = 0;
     REDIRECT_OUT = 0;
-    int argc_store;
-    char *argv_store[MAX_ARGC];
-    split(cmd, &argc_store, argv_store);
-    /*
-    for(int i = 0;i < argc_store;i++)
+    int argc_store[MAX_PIPE_NUM];
+    char *argv_store[MAX_PIPE_NUM][MAX_ARGC];
+    pid_t pid_array[MAX_PIPE_NUM] = {-1};
+    int cmd_idx = 0;
+    int cmd_offset = 0;
+    while(cmd_offset = parser(cmd+cmd_offset, &argc_store[cmd_idx], argv_store[cmd_idx]))
     {
-        printf("%d:%s\n",i,argv_store[i]);
-    }
-    */
-    if(argc_store == 0)
-    {
-        return;
-    }
-    int pid = -1;
-    setpgid_ok = 0;
-    if((pid = fork()) == 0)//child
-    {
-        int fd_in;
-        int fd_out;
-        if(REDIRECT_IN)
+        /*Managing multiple commands relative variable*/
+        if(argc_store[cmd_idx] == 0)
         {
-            fd_in = open(filename_in, O_RDONLY);
-            dup2(fd_in, STDIN_FILENO);
+            cmd_idx--;
+            break;
         }
-        if(REDIRECT_OUT)
+        cmd_idx++;
+    }
+    for(int i = 0;i <= cmd_idx;i++)
+    {
+        if((pid_array[i] = fork()) == 0)//child
         {
-            fd_out = open(filename_out, O_WRONLY | O_CREAT);
-            dup2(fd_out, STDOUT_FILENO);
-        }
-
-        if(execvp(argv_store[0], argv_store) == -1)
-        {
+            int fd_in;
+            int fd_out;
+            if(REDIRECT_IN)
+            {
+                fd_in = open(filename_in, O_RDONLY);
+                dup2(fd_in, STDIN_FILENO);
+            }
+            if(REDIRECT_OUT)
+            {
+                fd_out = open(filename_out, O_WRONLY | O_CREAT, 0666);
+                dup2(fd_out, STDOUT_FILENO);
+            }
+            if(execvp(argv_store[i][0], argv_store[i]) == -1)
+            {
+                if(REDIRECT_IN)
+                {
+                    close(fd_in);
+                }
+                if(REDIRECT_OUT)
+                {
+                    close(fd_out);
+                }
+                fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[i][0],errno);
+                _exit(EXIT_FAILURE); // If child fails
+            }
             if(REDIRECT_IN)
             {
                 close(fd_in);
@@ -132,28 +160,20 @@ static void run(char *cmd)
             {
                 close(fd_out);
             }
-            fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[0],errno);
-            _exit(EXIT_FAILURE); // If child fails
+            REDIRECT_IN = 0;
+            REDIRECT_OUT = 0;
         }
-        if(REDIRECT_IN)
+        //parent
+        int status;
+        while(waitpid(pid_array[i], &status, WNOHANG) <= 0)
         {
-            close(fd_in);
         }
-        if(REDIRECT_OUT)
-        {
-            close(fd_out);
-        }
-        REDIRECT_IN = 0;
-        REDIRECT_OUT = 0;
+        
     }
     //parent
-    int gid = pid;
-    /*TODO:setup foreground/background pg*/
+    //TODO:setup foreground/background pg
+    //TODO:create pipe
     //setpgid(pid,gid);
-    int status;
-    while(waitpid(pid, &status, WNOHANG) <= 0)
-    {
-    }
     
 }
 
