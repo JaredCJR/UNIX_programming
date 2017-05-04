@@ -11,23 +11,23 @@
 #define MAX_ARGC       64
 #define MAX_PIPE_NUM   10
 
-typedef struct{
-    int in;
-    int out;
-}PIPE_MAP;
-
 #define PIPE_IN_FD   0
 #define PIPE_OUT_FD  1
+
+#define MAX_PG     100
 
 int REDIRECT_IN = 0;
 int REDIRECT_OUT = 0;
 char filename_in[1024];
 char filename_out[1024];
 pid_t pid_array[MAX_PIPE_NUM] = {-1};
+int BACKGROUND_MODE = 0;
 
 pid_t shell_pid;
 int parse_end = 0;
 volatile int core_dump = 0;
+pid_t pgid_map[MAX_PG] = {0};
+int PGID_MAP_IDX = 0;
 
 int orig_sigint_handler;
 int orig_sigquit_handler;
@@ -79,7 +79,7 @@ static void redirect_output(char *fname)
  * 0:non-pipe_mode
  * others: cmd offset for pipe mode
  */
-static int parser(char *cmd,int *argc,char *argv[MAX_ARGC], PIPE_MAP *pipe_map,int is_pipe_in)
+static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
 {
     const char* deli = " \n\r";
     argv[*argc = 0] = strtok(cmd, deli);
@@ -87,10 +87,6 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC], PIPE_MAP *pipe_map,i
     if(argv[0] == NULL)
     {
         return 0;
-    }
-    if(is_pipe_in)
-    {
-        pipe_map->in = 1;
     }
     while ((argv[*argc] = strtok(NULL, deli)) != NULL)
     {
@@ -110,20 +106,42 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC], PIPE_MAP *pipe_map,i
         {
             int offset = argv[*argc] - cmd + 2;//addition 1 for strtok()'s '\0'
             argv[*argc] = NULL;//clear "|"
-            pipe_map->out = 1;
             parse_end = 0;
             return offset;
+        }
+        if(strcmp(argv[*argc],"&") == 0)
+        {
+            argv[*argc] = NULL;//clear ">"
+            BACKGROUND_MODE = 1;
+            return 0;
         }
         (*argc)++;
     }
     return 0;
 }
 
-static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC],int is_last)
+static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first)
 {
     pid_t pid;
     if ((pid = fork ()) == 0)
     {
+        if(BACKGROUND_MODE)
+        {
+            if(is_first)
+            {
+                if(setpgid(0,0))
+                {
+                    perror("setpgid failed\n");
+                }
+                pgid_map[PGID_MAP_IDX] = getpid();
+            }else
+            {
+                if(setpgid(0,pgid_map[PGID_MAP_IDX]))
+                {
+                    perror("setpgid failed\n");
+                }
+            }
+        }
         if(fd_in != STDIN_FILENO)
         {
             dup2(fd_in,STDIN_FILENO);
@@ -149,12 +167,10 @@ static void run(char *cmd)
     REDIRECT_OUT = 0;
     int argc_store[MAX_PIPE_NUM];
     char *argv_store[MAX_PIPE_NUM][MAX_ARGC];
-    PIPE_MAP pipes_map[MAX_PIPE_NUM] = {{0,0}};
     int cmd_idx = 0;
     int cmd_offset = 0;
-    int is_pipe_in = 0;
     parse_end = 0;
-    while(cmd_offset += parser(cmd+cmd_offset, &argc_store[cmd_idx], argv_store[cmd_idx],&pipes_map[cmd_idx],is_pipe_in))
+    while(cmd_offset += parser(cmd+cmd_offset, &argc_store[cmd_idx], argv_store[cmd_idx]))
     {
         /*Managing multiple commands relative variable*/
         if(argc_store[cmd_idx] == 0 || parse_end)
@@ -162,7 +178,6 @@ static void run(char *cmd)
             break;
         }
         parse_end = 1;
-        is_pipe_in = pipes_map[cmd_idx].out ? 1 : 0;
         cmd_idx++;
     }
     /*fork pipeline*/
@@ -171,7 +186,7 @@ static void run(char *cmd)
     for(int i = 0;i < cmd_idx;i++)//the last command should output to the original STDOUT_FILENO
     {
         pipe(pipe_fd);
-        sub_command(in,pipe_fd[PIPE_OUT_FD],argv_store[i],cmd_idx == i);
+        sub_command(in,pipe_fd[PIPE_OUT_FD],argv_store[i],i==0);
         close(pipe_fd[PIPE_OUT_FD]);
         in = pipe_fd[PIPE_IN_FD];
     }
@@ -181,6 +196,24 @@ static void run(char *cmd)
     int fd_out;
     if ((pid = fork ()) == 0)
     {
+        if(BACKGROUND_MODE)
+        {
+            BACKGROUND_MODE = 0;
+            if(cmd_idx == 0)
+            {
+                if(setpgid(0,0))
+                {
+                    perror("setpgid failed\n");
+                }
+                pgid_map[PGID_MAP_IDX++] = getpid();
+            }else
+            {
+                if(setpgid(0,pgid_map[PGID_MAP_IDX++]))
+                {
+                    perror("setpgid failed\n");
+                }
+            }
+        }
         if(in != STDIN_FILENO)
         {
             dup2(in, STDIN_FILENO);
@@ -198,7 +231,7 @@ static void run(char *cmd)
             dup2(fd_out, STDOUT_FILENO);
             close(fd_out);
         }
-        if(execvp(argv_store[cmd_idx][0], argv_store) == -1)
+        if(execvp(argv_store[cmd_idx][0], argv_store[cmd_idx]) == -1)
         {
             fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[cmd_idx][0],errno);
             _exit(EXIT_FAILURE); // If child fails
@@ -225,7 +258,7 @@ int main(void)
     if (signal(SIGCHLD, sig_handler) == SIG_ERR)
         printf("\ncan't catch SIGCHLD\n");
 
-
+    PGID_MAP_IDX = 0;
     size_t buf_len = 1024;
     char *cmd_buf = (char*)malloc(buf_len);
     if( cmd_buf == NULL)
