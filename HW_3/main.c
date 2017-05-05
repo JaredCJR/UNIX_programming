@@ -120,26 +120,33 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
     return 0;
 }
 
-static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first)
+static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first,pid_t pgid_idx)
 {
     pid_t pid;
     if ((pid = fork ()) == 0)
     {
-        if(BACKGROUND_MODE)
+        if(is_first)
         {
-            if(is_first)
+            if(setpgid(0,0))
             {
-                if(setpgid(0,0))
-                {
-                    perror("setpgid failed\n");
-                }
-                pgid_map[PGID_MAP_IDX] = getpid();
-            }else
+                perror("setpgid failed\n");
+            }
+            pgid_map[pgid_idx] = getpgid(0);
+            /*
+            printf("real pgid=%d, idx=%d\n",pgid_map[pgid_idx],pgid_idx);
+            */
+        }else
+        {
+            /*
+            if(pgid_map[pgid_idx] == 0 )
             {
-                if(setpgid(0,pgid_map[PGID_MAP_IDX]))
-                {
-                    perror("setpgid failed\n");
-                }
+                fprintf(stderr,"pgid==0, pgid_idx=%d\n",pgid_idx);
+                exit(EXIT_FAILURE);
+            }
+            */
+            if(setpgid(0,pgid_map[pgid_idx]))
+            {
+                perror("setpgid failed\n");
             }
         }
         if(fd_in != STDIN_FILENO)
@@ -183,10 +190,11 @@ static void run(char *cmd)
     /*fork pipeline*/
     int pipe_fd[2];
     int in = STDIN_FILENO;
+    int pgid_save = PGID_MAP_IDX;
     for(int i = 0;i < cmd_idx;i++)//the last command should output to the original STDOUT_FILENO
     {
         pipe(pipe_fd);
-        sub_command(in,pipe_fd[PIPE_OUT_FD],argv_store[i],i==0);
+        sub_command(in,pipe_fd[PIPE_OUT_FD],argv_store[i],i==0,pgid_save);
         close(pipe_fd[PIPE_OUT_FD]);
         in = pipe_fd[PIPE_IN_FD];
     }
@@ -196,22 +204,18 @@ static void run(char *cmd)
     int fd_out;
     if ((pid = fork ()) == 0)
     {
-        if(BACKGROUND_MODE)
+        if(cmd_idx == 0)
         {
-            BACKGROUND_MODE = 0;
-            if(cmd_idx == 0)
+            if(setpgid(0,0))
             {
-                if(setpgid(0,0))
-                {
-                    perror("setpgid failed\n");
-                }
-                pgid_map[PGID_MAP_IDX++] = getpid();
-            }else
+                perror("setpgid failed\n");
+            }
+            pgid_map[PGID_MAP_IDX++] = getpgid(0);
+        }else
+        {
+            if(setpgid(0,pgid_map[PGID_MAP_IDX++]))
             {
-                if(setpgid(0,pgid_map[PGID_MAP_IDX++]))
-                {
-                    perror("setpgid failed\n");
-                }
+                perror("setpgid failed\n");
             }
         }
         if(in != STDIN_FILENO)
