@@ -98,7 +98,7 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
     return 0;
 }
 
-static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first,pid_t pgid_idx)
+static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first,pid_t pgid_idx)
 {
     pid_t pid;
     if ((pid = fork ()) == 0)
@@ -140,6 +140,7 @@ static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_
     {
        pgid_map[pgid_idx] = pid; 
     }
+    return pid;//child never comes here
 }
 
 
@@ -181,55 +182,19 @@ static void run(char *cmd)
     int pid;
     int fd_in;
     int fd_out;
-    if ((pid = fork ()) == 0)
+    if(REDIRECT_IN)
     {
-        if(cmd_idx == 0)
-        {
-            if(setpgid(0,0))
-            {
-                perror("setpgid failed");
-            }
-            pgid_map[PGID_MAP_IDX] = getpgid(0);
-        }else
-        {
-            if(setpgid(0,pgid_map[PGID_MAP_IDX]))
-            {
-                perror("setpgid failed");
-            }
-        }
-        if(in != STDIN_FILENO)
-        {
-            dup2(in, STDIN_FILENO);
-            close(in);
-        }
-        if(REDIRECT_IN)
-        {
-            fd_in = open(filename_in, O_RDONLY);
-            dup2(fd_in, STDIN_FILENO);
-            close(fd_in);
-        }
-        if(REDIRECT_OUT)
-        {
-            fd_out = open(filename_out, O_WRONLY | O_CREAT, 0666);
-            dup2(fd_out, STDOUT_FILENO);
-            close(fd_out);
-        }
-        if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
-        {
-            perror("Failed to change signal mask.");
-        }
-        if(execvp(argv_store[cmd_idx][0], argv_store[cmd_idx]) == -1)
-        {
-            fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[cmd_idx][0],errno);
-            _exit(EXIT_FAILURE); // If child fails
-        }
-    }else
-    {
-        if((pid > 0) && (cmd_idx == 0))
-        {
-            pgid_map[PGID_MAP_IDX] = pid;
-        }
+        fd_in = open(filename_in, O_RDONLY);
+        dup2(fd_in, STDIN_FILENO);
+        close(fd_in);
     }
+    if(REDIRECT_OUT)
+    {
+        fd_out = open(filename_out, O_WRONLY | O_CREAT, 0666);
+        dup2(fd_out, STDOUT_FILENO);
+        close(fd_out);
+    }
+    pid = sub_command(in,STDOUT_FILENO,argv_store[cmd_idx],cmd_idx==0,pgid_save);
     if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
     {
         perror("Failed to change signal mask.");
@@ -243,10 +208,10 @@ static void run(char *cmd)
 		    perror("Failed to set foreground process for command");
         }
         BACKGROUND_MODE = 0;
+        int status;
+        waitpid(pid, &status, 0);
     }
     PGID_MAP_IDX++;
-    int status;
-    waitpid(pid, &status, 0);
 	if( tcsetpgrp(STDIN_FILENO, shell_pgid) == -1 ||
 	    tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
 	    tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
