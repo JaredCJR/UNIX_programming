@@ -29,38 +29,15 @@ int parse_end = 0;
 volatile int core_dump = 0;
 pid_t pgid_map[MAX_PG] = {0};
 int PGID_MAP_IDX = 0;
+sigset_t SignalSet;
 
 int orig_sigint_handler;
 int orig_sigquit_handler;
 
-void sig_handler(int signo)
-{
-    if (signo == SIGINT)//looks for ctrl-c which has a value of 2
-    {
-        if(getpid() != shell_pid)
-        {
-            signal(SIGINT,orig_sigint_handler);
-            raise(signo);
-        }
-    }
-    else if (signo == SIGQUIT)//looks for ctrl-\ which has a value of 9
-    {
-        if(getpid() != shell_pid)
-        {
-            signal(SIGQUIT,orig_sigquit_handler);
-            core_dump = 1;
-            raise(signo);
-        }
-    }else if(signo == SIGCHLD)
-    {
-        /*
-        if((getpid() == shell_pid) && core_dump)
-        {
-            core_dump = 0;
-            printf("Quit (core dumped)\n");
-        }
-        */
-    }
+void KillChildren(int Signal){
+	if( kill(-pgid_map[PGID_MAP_IDX], Signal) == -1 )
+		perror("Failed to kill children");
+
 }
 
 static void redirect_input(char *fname)
@@ -130,14 +107,14 @@ static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_
         {
             if(setpgid(0,0))
             {
-                perror("setpgid failed\n");
+                perror("setpgid failed");
             }
             pgid_map[pgid_idx] = getpgid(0);
         }else
         {
             if(setpgid(0,pgid_map[pgid_idx]))
             {
-                perror("setpgid failed\n");
+                perror("setpgid failed");
             }
         }
         if(fd_in != STDIN_FILENO)
@@ -149,6 +126,10 @@ static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_
         {
             dup2(fd_out,STDOUT_FILENO);
             close(fd_out);
+        }
+        if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
+        {
+            perror("Failed to change signal mask.");
         }
         if(execvp(argv_store[0], argv_store) == -1)
         {
@@ -171,6 +152,10 @@ static void run(char *cmd)
     int cmd_idx = 0;
     int cmd_offset = 0;
     parse_end = 0;
+    if( sigprocmask(SIG_BLOCK, &SignalSet, NULL) == -1 )
+    {
+			perror("Failed to change signal mask.");
+	}
     while(cmd_offset += parser(cmd+cmd_offset, &argc_store[cmd_idx], argv_store[cmd_idx]))
     {
         /*Managing multiple commands relative variable*/
@@ -202,14 +187,14 @@ static void run(char *cmd)
         {
             if(setpgid(0,0))
             {
-                perror("setpgid failed\n");
+                perror("setpgid failed");
             }
             pgid_map[PGID_MAP_IDX] = getpgid(0);
         }else
         {
             if(setpgid(0,pgid_map[PGID_MAP_IDX]))
             {
-                perror("setpgid failed\n");
+                perror("setpgid failed");
             }
         }
         if(in != STDIN_FILENO)
@@ -229,6 +214,10 @@ static void run(char *cmd)
             dup2(fd_out, STDOUT_FILENO);
             close(fd_out);
         }
+        if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
+        {
+            perror("Failed to change signal mask.");
+        }
         if(execvp(argv_store[cmd_idx][0], argv_store[cmd_idx]) == -1)
         {
             fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[cmd_idx][0],errno);
@@ -241,37 +230,51 @@ static void run(char *cmd)
             pgid_map[PGID_MAP_IDX] = pid;
         }
     }
-    //TODO:setup foreground/background pg
+    if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
+    {
+        perror("Failed to change signal mask.");
+    }
 	if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
 	    tcsetpgrp(STDOUT_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
 	    tcsetpgrp(STDERR_FILENO, pgid_map[PGID_MAP_IDX]) == -1 )
 	{
-		perror("Failed to set foreground process for command\n");
+		perror("Failed to set foreground process for command");
     }
     PGID_MAP_IDX++;
     int status;
-    while(waitpid(pid, &status, WNOHANG) <= 0)
-    {
-    }
-/*    
+    waitpid(pid, &status, 0);
 	if( tcsetpgrp(STDIN_FILENO, shell_pgid) == -1 ||
 	    tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
 	    tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
 	{
 		perror("Failed to set foreground process for command\n");
     }
-*/  
 }
 
 int main(void)
 {
-	/*Catch SIGNAL*/
-    if ((orig_sigint_handler = signal(SIGINT, sig_handler)) == SIG_ERR)
-        printf("\ncan't catch SIGINT\n");
-    if ((orig_sigquit_handler = signal(SIGQUIT, sig_handler)) == SIG_ERR)
-        printf("\ncan't catch SIGQUIT\n");
-    if (signal(SIGCHLD, sig_handler) == SIG_ERR)
-        printf("\ncan't catch SIGCHLD\n");
+ 	if(signal(SIGINT, KillChildren) == SIG_ERR ||
+	   signal(SIGQUIT, KillChildren) == SIG_ERR)
+    {
+        perror("SIGINT and SIGQUIT register failed");
+    }
+
+	//ignore fg/bg process signal
+	if( signal(SIGTTIN, SIG_IGN) == SIG_ERR ||
+	    signal(SIGTTOU, SIG_IGN) == SIG_ERR ||
+	    signal(SIGTSTP, SIG_IGN) == SIG_ERR ||
+	    signal(SIGCHLD, SIG_IGN) == SIG_ERR  )
+    {
+        perror("SIGTTIN,SIGTTOU,SIGTSTP,SIGCHLD  register failed");
+    }
+
+    if( sigemptyset(&SignalSet) == -1 ||
+	    sigaddset(&SignalSet, SIGINT) == -1 ||
+	    sigaddset(&SignalSet, SIGQUIT) == -1 )
+    {
+		perror("Failed to set signal set.");
+	}
+
 
     PGID_MAP_IDX = 0;
     size_t buf_len = 1024;
@@ -280,6 +283,10 @@ int main(void)
     {
         perror("Unable to allocate buffer");
         exit(1);
+    }
+    if(setpgid(0,0) == -1)
+    {
+        perror("Shell failed to become new pg");
     }
     shell_pgid = getpgid(0);
     shell_pid = getpid();
