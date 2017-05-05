@@ -8,13 +8,15 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#define MAX_ARGC       64
-#define MAX_PIPE_NUM   10
+#define MAX_ARGC           64
+#define MAX_PIPE_NUM       10
 
-#define PIPE_IN_FD   0
-#define PIPE_OUT_FD  1
+#define PIPE_IN_FD          0
+#define PIPE_OUT_FD         1
 
-#define MAX_PG     100
+#define MAX_PG            100
+
+#define MAGIC_BUILDIN   -9487
 
 int REDIRECT_IN = 0;
 int REDIRECT_OUT = 0;
@@ -98,8 +100,35 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
     return 0;
 }
 
+static void do_environVar(char *cmd,char *arg)
+{
+    char *var_name = strtok(arg,"=");
+    if(var_name == NULL)
+    {
+        fprintf(stderr,"Variable not specified!\n");
+        return;
+    }
+    if(strcmp(cmd,"export") == 0)
+    {
+        //Usage: export foo=asdfgasd
+        int overwrite = 1;
+        char *var_value = strtok(NULL,"=");
+        setenv(var_name, var_value, overwrite);
+        //printf("name=%s, val=%s\n",var_name,var_value);
+    }else//unset
+    {
+        //Usage: unset VAR_NAME
+        unsetenv(var_name);
+    }
+}
+
 static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first,pid_t pgid_idx)
 {
+    if((strcmp(argv_store[0],"export") == 0)||(strcmp(argv_store[0],"unset") == 0))
+    {
+        do_environVar(argv_store[0], argv_store[1]);
+        return MAGIC_BUILDIN;
+    }
     pid_t pid;
     if ((pid = fork ()) == 0)
     {
@@ -178,7 +207,7 @@ static void run(char *cmd)
         close(pipe_fd[PIPE_OUT_FD]);
         in = pipe_fd[PIPE_IN_FD];
     }
-    //last command
+    //last command in pipeline
     int pid;
     int fd_in;
     int fd_out;
@@ -196,40 +225,50 @@ static void run(char *cmd)
         dup2(fd_out, STDOUT_FILENO);
         close(fd_out);
     }
+    if(strcmp(argv_store[cmd_idx][0],"exit") == 0 && cmd_idx == 0)
+    {
+        exit(EXIT_SUCCESS);
+    }
     pid = sub_command(in,STDOUT_FILENO,argv_store[cmd_idx],cmd_idx==0,pgid_save);
     if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
     {
         perror("Failed to change signal mask.");
     }
-    if(REDIRECT_IN)
+    if( pid != MAGIC_BUILDIN)
     {
-        dup2(stdin_copy,STDIN_FILENO);
-        close(stdin_copy);
-    }
-    if(REDIRECT_OUT)
-    {
-        dup2(stdout_copy,STDOUT_FILENO);
-        close(stdout_copy);
-    }
-    if(!BACKGROUND_MODE)
-    {
-	    if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
-	        tcsetpgrp(STDOUT_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
-	        tcsetpgrp(STDERR_FILENO, pgid_map[PGID_MAP_IDX]) == -1 )
-	    {
-		    perror("Failed to set foreground process for command");
+        if(REDIRECT_IN)
+        {
+            dup2(stdin_copy,STDIN_FILENO);
+            close(stdin_copy);
         }
-        BACKGROUND_MODE = 0;
-        int status;
-        waitpid(pid, &status, 0);
-    }
+        if(REDIRECT_OUT)
+        {
+            dup2(stdout_copy,STDOUT_FILENO);
+            close(stdout_copy);
+        }
+        if(!BACKGROUND_MODE)
+        {
+	        if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
+	            tcsetpgrp(STDOUT_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
+	            tcsetpgrp(STDERR_FILENO, pgid_map[PGID_MAP_IDX]) == -1 )
+	        {
+		        perror("Failed to set foreground process for command");
+            }
+            BACKGROUND_MODE = 0;
+            int status;
+            waitpid(pid, &status, 0);
+        }
 	    if( tcsetpgrp(STDIN_FILENO, shell_pgid) == -1 ||
 	        tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
 	        tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
 	    {
-		    perror("Failed to set foreground process for shell\n");
+	        perror("Failed to set foreground process for shell\n");
         }
-    PGID_MAP_IDX++;
+        PGID_MAP_IDX++;
+    }else//shell build-in
+    {
+        //do nothing
+    }
 }
 
 int main(void)
