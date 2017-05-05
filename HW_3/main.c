@@ -7,16 +7,19 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include "glob.h"
+#include <string.h>
 
-#define MAX_ARGC           64
-#define MAX_PIPE_NUM       10
+#define MAX_ARGC              256
+#define MAX_PIPE_NUM           20
 
-#define PIPE_IN_FD          0
-#define PIPE_OUT_FD         1
+#define PIPE_IN_FD              0
+#define PIPE_OUT_FD             1
 
-#define MAX_PG            100
+#define MAX_PG                300
 
-#define MAGIC_BUILDIN   -9487
+#define MAGIC_BUILDIN     -109487
+#define MAGIC_INVALID_CMD -999487
 
 int REDIRECT_IN = 0;
 int REDIRECT_OUT = 0;
@@ -24,6 +27,7 @@ char filename_in[1024];
 char filename_out[1024];
 pid_t pid_array[MAX_PIPE_NUM] = {-1};
 int BACKGROUND_MODE = 0;
+char cwd[1024];
 
 pid_t shell_pgid;
 pid_t shell_pid;
@@ -32,6 +36,7 @@ volatile int core_dump = 0;
 pid_t pgid_map[MAX_PG] = {0};
 int PGID_MAP_IDX = 0;
 sigset_t SignalSet;
+glob_t glob_result;
 
 int orig_sigint_handler;
 int orig_sigquit_handler;
@@ -70,6 +75,23 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
     }
     while ((argv[*argc] = strtok(NULL, deli)) != NULL)
     {
+        char *match;
+        //expanding metacharachers
+		if(((match = strchr(argv[*argc],'\?')) != NULL) ||
+		   ((match = strchr(argv[*argc],'*')) != NULL)  )
+        {
+            match = '\0';
+            char cwd_copy[1024];
+            strcpy(cwd_copy,cwd);
+            strcat(cwd_copy,"/");
+            strcat(cwd_copy,argv[*argc]);
+            glob(cwd_copy,GLOB_TILDE,NULL,&glob_result);
+            for(unsigned int i=0;i<glob_result.gl_pathc;i++)
+            {
+                argv[(*argc)++] = glob_result.gl_pathv[i];
+            }
+            continue;
+        }
         if(strcmp(argv[*argc],"<") == 0)
         {
             argv[*argc] = NULL;//clear "<"
@@ -102,7 +124,7 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
 
 static void do_environVar(char *cmd,char *arg)
 {
-    char *var_name = strtok(arg,"=");
+    char *var_name = strtok(arg,"=\n\r");
     if(var_name == NULL)
     {
         fprintf(stderr,"Variable not specified!\n");
@@ -169,6 +191,7 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
     {
        pgid_map[pgid_idx] = pid; 
     }
+    globfree(&glob_result);
     return pid;//child never comes here
 }
 
@@ -208,7 +231,7 @@ static void run(char *cmd)
         in = pipe_fd[PIPE_IN_FD];
     }
     //last command in pipeline
-    int pid;
+    int pid = MAGIC_INVALID_CMD;
     int fd_in;
     int fd_out;
     int stdin_copy = dup(STDIN_FILENO);
@@ -225,16 +248,19 @@ static void run(char *cmd)
         dup2(fd_out, STDOUT_FILENO);
         close(fd_out);
     }
-    if(strcmp(argv_store[cmd_idx][0],"exit") == 0 && cmd_idx == 0)
+    if(argv_store[cmd_idx][0] != NULL)
     {
-        exit(EXIT_SUCCESS);
+        if(strcmp(argv_store[cmd_idx][0],"exit") == 0 && cmd_idx == 0)
+        {
+            exit(EXIT_SUCCESS);
+        }
+        pid = sub_command(in,STDOUT_FILENO,argv_store[cmd_idx],cmd_idx==0,pgid_save);
     }
-    pid = sub_command(in,STDOUT_FILENO,argv_store[cmd_idx],cmd_idx==0,pgid_save);
     if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
     {
         perror("Failed to change signal mask.");
     }
-    if( pid != MAGIC_BUILDIN)
+    if( pid != MAGIC_BUILDIN && pid != MAGIC_INVALID_CMD)
     {
         if(REDIRECT_IN)
         {
@@ -295,6 +321,10 @@ int main(void)
 		perror("Failed to set signal set.");
 	}
 
+    if (getcwd(cwd, sizeof(cwd)) == NULL)
+    {
+        perror("getcwd() error");
+    }
 
     PGID_MAP_IDX = 0;
     size_t buf_len = 1024;
