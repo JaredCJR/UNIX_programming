@@ -72,13 +72,13 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
         {
             argv[*argc] = NULL;//clear "<"
             redirect_input(strtok(NULL, deli));
-            return 0;
+            (*argc)--;
         }
         if(strcmp(argv[*argc],">") == 0)
         {
             argv[*argc] = NULL;//clear ">"
             redirect_output(strtok(NULL, deli));
-            return 0;
+            (*argc)--;
         }
         if(strcmp(argv[*argc],"|") == 0)
         {
@@ -182,6 +182,8 @@ static void run(char *cmd)
     int pid;
     int fd_in;
     int fd_out;
+    int stdin_copy = dup(STDIN_FILENO);
+    int stdout_copy = dup(STDOUT_FILENO);
     if(REDIRECT_IN)
     {
         fd_in = open(filename_in, O_RDONLY);
@@ -199,6 +201,16 @@ static void run(char *cmd)
     {
         perror("Failed to change signal mask.");
     }
+    if(REDIRECT_IN)
+    {
+        dup2(stdin_copy,STDIN_FILENO);
+        close(stdin_copy);
+    }
+    if(REDIRECT_OUT)
+    {
+        dup2(stdout_copy,STDOUT_FILENO);
+        close(stdout_copy);
+    }
     if(!BACKGROUND_MODE)
     {
 	    if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
@@ -211,13 +223,13 @@ static void run(char *cmd)
         int status;
         waitpid(pid, &status, 0);
     }
+	    if( tcsetpgrp(STDIN_FILENO, shell_pgid) == -1 ||
+	        tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
+	        tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
+	    {
+		    perror("Failed to set foreground process for shell\n");
+        }
     PGID_MAP_IDX++;
-	if( tcsetpgrp(STDIN_FILENO, shell_pgid) == -1 ||
-	    tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
-	    tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
-	{
-		perror("Failed to set foreground process for shell\n");
-    }
 }
 
 int main(void)
