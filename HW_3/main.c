@@ -23,6 +23,7 @@ char filename_out[1024];
 pid_t pid_array[MAX_PIPE_NUM] = {-1};
 int BACKGROUND_MODE = 0;
 
+pid_t shell_pgid;
 pid_t shell_pid;
 int parse_end = 0;
 volatile int core_dump = 0;
@@ -132,18 +133,8 @@ static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_
                 perror("setpgid failed\n");
             }
             pgid_map[pgid_idx] = getpgid(0);
-            /*
-            printf("real pgid=%d, idx=%d\n",pgid_map[pgid_idx],pgid_idx);
-            */
         }else
         {
-            /*
-            if(pgid_map[pgid_idx] == 0 )
-            {
-                fprintf(stderr,"pgid==0, pgid_idx=%d\n",pgid_idx);
-                exit(EXIT_FAILURE);
-            }
-            */
             if(setpgid(0,pgid_map[pgid_idx]))
             {
                 perror("setpgid failed\n");
@@ -164,6 +155,9 @@ static void sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_
             fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[0],errno);
             _exit(EXIT_FAILURE); // If child fails
         }
+    }else if(pid > 0 && is_first)
+    {
+       pgid_map[pgid_idx] = pid; 
     }
 }
 
@@ -210,10 +204,10 @@ static void run(char *cmd)
             {
                 perror("setpgid failed\n");
             }
-            pgid_map[PGID_MAP_IDX++] = getpgid(0);
+            pgid_map[PGID_MAP_IDX] = getpgid(0);
         }else
         {
-            if(setpgid(0,pgid_map[PGID_MAP_IDX++]))
+            if(setpgid(0,pgid_map[PGID_MAP_IDX]))
             {
                 perror("setpgid failed\n");
             }
@@ -240,16 +234,33 @@ static void run(char *cmd)
             fprintf(stderr,"exec():%s  failed,errno=%d\n",argv_store[cmd_idx][0],errno);
             _exit(EXIT_FAILURE); // If child fails
         }
+    }else
+    {
+        if((pid > 0) && (cmd_idx == 0))
+        {
+            pgid_map[PGID_MAP_IDX] = pid;
+        }
     }
+    //TODO:setup foreground/background pg
+	if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
+	    tcsetpgrp(STDOUT_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
+	    tcsetpgrp(STDERR_FILENO, pgid_map[PGID_MAP_IDX]) == -1 )
+	{
+		perror("Failed to set foreground process for command\n");
+    }
+    PGID_MAP_IDX++;
     int status;
     while(waitpid(pid, &status, WNOHANG) <= 0)
     {
     }
-    //parent
-    //TODO:setup foreground/background pg
-    //TODO:create pipe
-    //setpgid(pid,gid);
-    
+/*    
+	if( tcsetpgrp(STDIN_FILENO, shell_pgid) == -1 ||
+	    tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
+	    tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
+	{
+		perror("Failed to set foreground process for command\n");
+    }
+*/  
 }
 
 int main(void)
@@ -270,6 +281,7 @@ int main(void)
         perror("Unable to allocate buffer");
         exit(1);
     }
+    shell_pgid = getpgid(0);
     shell_pid = getpid();
     while(1)
     {
