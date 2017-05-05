@@ -234,11 +234,15 @@ static void run(char *cmd)
     {
         perror("Failed to change signal mask.");
     }
-	if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
-	    tcsetpgrp(STDOUT_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
-	    tcsetpgrp(STDERR_FILENO, pgid_map[PGID_MAP_IDX]) == -1 )
-	{
-		perror("Failed to set foreground process for command");
+    if(!BACKGROUND_MODE)
+    {
+	    if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
+	        tcsetpgrp(STDOUT_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
+	        tcsetpgrp(STDERR_FILENO, pgid_map[PGID_MAP_IDX]) == -1 )
+	    {
+		    perror("Failed to set foreground process for command");
+        }
+        BACKGROUND_MODE = 0;
     }
     PGID_MAP_IDX++;
     int status;
@@ -247,7 +251,7 @@ static void run(char *cmd)
 	    tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
 	    tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
 	{
-		perror("Failed to set foreground process for command\n");
+		perror("Failed to set foreground process for shell\n");
     }
 }
 
