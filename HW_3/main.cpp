@@ -98,22 +98,30 @@ static int parser(char *cmd,int *argc,char *argv[MAX_ARGC])
     }
     while ((argv[*argc] = strtok(NULL, deli)) != NULL)
     {
-        char *match;
+        char *match_1;
+        char *match_2;
         //expanding metacharachers
-		if(((match = strchr(argv[*argc],'\?')) != NULL) ||
-		   ((match = strchr(argv[*argc],'*')) != NULL)  )
+		if(((match_1 = strchr(argv[*argc],'\?')) != NULL) ||
+		   ((match_2 = strchr(argv[*argc],'*')) != NULL)  )
         {
-            match = '\0';
+            match_1 = '\0';
+            match_2 = '\0';
             char cwd_copy[1024];
             strcpy(cwd_copy,cwd);
             strcat(cwd_copy,"/");
             strcat(cwd_copy,argv[*argc]);
             glob(cwd_copy,GLOB_TILDE,NULL,&glob_result);
-            for(unsigned int i=0;i<glob_result.gl_pathc;i++)
+            if(glob_result.gl_pathc == 0)//no matching
             {
-                argv[(*argc)++] = glob_result.gl_pathv[i];
+                //do nothing
+            }else
+            {
+                for(unsigned int i=0;i<glob_result.gl_pathc;i++)
+                {
+                    argv[(*argc)++] = glob_result.gl_pathv[i];
+                }
+                continue;
             }
-            continue;
         }
         if(strcmp(argv[*argc],"<") == 0)
         {
