@@ -32,6 +32,7 @@ char filename_out[1024];
 pid_t pid_array[MAX_PIPE_NUM] = {-1};
 int BACKGROUND_MODE = 0;
 char cwd[1024];
+int WaitForChildren = 1;
 
 int parse_end = 0;
 volatile int core_dump = 0;
@@ -43,11 +44,25 @@ uint32_t curr_PG;
 std::vector<std::string> PGs_cmd;
 #define SHELL_PG_IDX    0
 
-void KillChildren(int Signal){
-	if( kill(-PGs_table.back(), Signal) == -1 )
-		perror("Failed to kill children");
-    PGs_table.pop_back();
-    curr_PG--;
+void KillChildren(int Signal)
+{
+    if(getpid() != PGs_table.front())
+    {
+	    if( kill(-PGs_table.back(), Signal) == -1 )
+        {
+		    perror("Failed to kill children");
+        }
+        PGs_table.pop_back();
+        curr_PG--;
+    }
+}
+
+void SuspendChildren(int Signal)
+{
+    WaitForChildren = 0;
+    // call default handler
+    signal(SIGTSTP, SIG_DFL);
+    raise(SIGTSTP);
 }
 
 static void redirect_input(char *fname)
@@ -161,9 +176,21 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
         }
         return MAGIC_BUILDIN;
     }
+    if((strcmp(argv_store[0],"fg") == 0))
+    {
+        int status;
+        waitpid(PGs_table.back(), &status, 0);//FIXME
+        PGs_cmd.pop_back();
+        PGs_table.pop_back();
+        return MAGIC_BUILDIN;
+    }
     pid_t pid;
     if ((pid = fork ()) == 0)
     {
+	    if(signal(SIGTSTP, SuspendChildren) == SIG_ERR)
+        {
+            perror("support ctrl+z failed in child");
+        }
         if(is_first)
         {
             if(setpgid(0,0))
@@ -215,6 +242,7 @@ static void run(char *cmd)
     int cmd_offset = 0;
     parse_end = 0;
     BACKGROUND_MODE = 0;
+    WaitForChildren = 1;
     if( sigprocmask(SIG_BLOCK, &SignalSet, NULL) == -1 )
     {
 			perror("Failed to change signal mask.");
@@ -264,11 +292,15 @@ static void run(char *cmd)
         {
             exit(EXIT_SUCCESS);
         }
+        if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
+        {
+            perror("Failed to change signal mask.");
+        }
         pid = sub_command(in,STDOUT_FILENO,argv_store[cmd_idx],cmd_idx==0);
     }
-    if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
+    if(pid == MAGIC_INVALID_CMD)
     {
-        perror("Failed to change signal mask.");
+        return;
     }
     if( pid != MAGIC_BUILDIN && pid != MAGIC_INVALID_CMD)
     {
@@ -291,7 +323,10 @@ static void run(char *cmd)
 		        perror("Failed to set foreground process for command");
             }
             int status;
-            waitpid(pid, &status, 0);
+            while((waitpid(pid, &status, WNOHANG) <= 0) && WaitForChildren)
+            {
+            }
+            //waitpid(pid, &status, 0);
             PGs_cmd.pop_back();
             PGs_table.pop_back();
         }
@@ -306,6 +341,7 @@ static void run(char *cmd)
     {
         PGs_cmd.pop_back();
     }
+    fflush(NULL);
 }
 
 int main(void)
@@ -319,10 +355,9 @@ int main(void)
 	//ignore fg/bg process signal
 	if( signal(SIGTTIN, SIG_IGN) == SIG_ERR ||
 	    signal(SIGTTOU, SIG_IGN) == SIG_ERR ||
-	    signal(SIGTSTP, SIG_IGN) == SIG_ERR ||
-	    signal(SIGCHLD, SIG_IGN) == SIG_ERR  )
+	    signal(SIGTSTP, SIG_IGN) == SIG_ERR )
     {
-        perror("SIGTTIN,SIGTTOU,SIGTSTP,SIGCHLD  register failed");
+        perror("SIGTTIN,SIGTTOU,SIGTSTP  register failed");
     }
 
     if( sigemptyset(&SignalSet) == -1 ||
