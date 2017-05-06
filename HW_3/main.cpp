@@ -185,9 +185,25 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
     if((strcmp(argv_store[0],"fg") == 0))
     {
         int status;
-        waitpid(PGs_table.back(), &status, 0);//FIXME
-        PGs_cmd.pop_back();
-        PGs_table.pop_back();
+        kill(-PGs_table.back(),SIGCONT);
+	    if( tcsetpgrp(STDIN_FILENO, PGs_table.back()) == -1 ||
+	        tcsetpgrp(STDOUT_FILENO, PGs_table.back()) == -1 ||
+	        tcsetpgrp(STDERR_FILENO, PGs_table.back()) == -1 )
+	    {
+		    perror("Failed to set foreground process for command");
+        }
+        waitpid(PGs_table.back(), &status, WUNTRACED);//FIXME
+        if(!WIFSTOPPED(status))
+        {
+            PGs_cmd.pop_back();
+            PGs_table.pop_back();
+        }
+	    if( tcsetpgrp(STDIN_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
+	        tcsetpgrp(STDOUT_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
+	        tcsetpgrp(STDERR_FILENO, PGs_table[SHELL_PG_IDX]) == -1 )
+	    {
+	        perror("Failed to set foreground process for shell\n");
+        }
         return MAGIC_BUILDIN;
     }
     pid_t pid;
@@ -331,8 +347,11 @@ static void run(char *cmd)
             }
             */
             waitpid(pid, &status, WUNTRACED);
-            PGs_cmd.pop_back();
-            PGs_table.pop_back();
+            if(!WIFSTOPPED(status))
+            {
+                PGs_cmd.pop_back();
+                PGs_table.pop_back();
+            }
         }
 	    if( tcsetpgrp(STDIN_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
 	        tcsetpgrp(STDOUT_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
