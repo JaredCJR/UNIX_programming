@@ -59,10 +59,16 @@ void KillChildren(int Signal)
 
 void SuspendChildren(int Signal)
 {
-    WaitForChildren = 0;
-    // call default handler
-    signal(SIGTSTP, SIG_DFL);
-    raise(SIGTSTP);
+    if(getpid() == PGs_table.front())//shell
+    {
+    }else
+    {
+        if(signal(SIGTSTP,SIG_DFL) == SIG_ERR)
+        {
+            perror("Ctrl+z in child will not works");
+        }
+        raise(SIGTSTP);
+    }
 }
 
 static void redirect_input(char *fname)
@@ -187,10 +193,6 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
     pid_t pid;
     if ((pid = fork ()) == 0)
     {
-	    if(signal(SIGTSTP, SuspendChildren) == SIG_ERR)
-        {
-            perror("support ctrl+z failed in child");
-        }
         if(is_first)
         {
             if(setpgid(0,0))
@@ -323,10 +325,12 @@ static void run(char *cmd)
 		        perror("Failed to set foreground process for command");
             }
             int status;
+            /*
             while((waitpid(pid, &status, WNOHANG) <= 0) && WaitForChildren)
             {
             }
-            //waitpid(pid, &status, 0);
+            */
+            waitpid(pid, &status, WUNTRACED);
             PGs_cmd.pop_back();
             PGs_table.pop_back();
         }
@@ -354,10 +358,9 @@ int main(void)
 
 	//ignore fg/bg process signal
 	if( signal(SIGTTIN, SIG_IGN) == SIG_ERR ||
-	    signal(SIGTTOU, SIG_IGN) == SIG_ERR ||
-	    signal(SIGTSTP, SIG_IGN) == SIG_ERR )
+	    signal(SIGTTOU, SIG_IGN) == SIG_ERR  )
     {
-        perror("SIGTTIN,SIGTTOU,SIGTSTP  register failed");
+        perror("SIGTTIN,SIGTTOU  register failed");
     }
 
     if( sigemptyset(&SignalSet) == -1 ||
@@ -366,6 +369,10 @@ int main(void)
     {
 		perror("Failed to set signal set.");
 	}
+    if(signal(SIGTSTP, SuspendChildren) == SIG_ERR)
+    {
+        perror("support ctrl+z failed in child and shell");
+    }
 
     if (getcwd(cwd, sizeof(cwd)) == NULL)
     {
