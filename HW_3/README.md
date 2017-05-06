@@ -99,4 +99,10 @@ shell-prompt$ fg
 (bring back "less /etc/passwd" into foreground)
 ```
 
+* Test "&" background execution
+```
+shell-prompt$ find / &
+(You will not able to control "find" with your keyboard)
+```
+
 
