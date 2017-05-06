@@ -67,7 +67,7 @@ void SuspendChildren(int Signal)
         {
             perror("Ctrl+z in child will not works");
         }
-        raise(SIGTSTP);
+        raise(SIGSTOP);
     }
 }
 
@@ -192,7 +192,7 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
 	    {
 		    perror("Failed to set foreground process for command");
         }
-        waitpid(PGs_table.back(), &status, WUNTRACED);//FIXME
+        waitpid(PGs_table.back(), &status, WUNTRACED);
         if(!WIFSTOPPED(status))
         {
             PGs_cmd.pop_back();
@@ -204,6 +204,13 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
 	    {
 	        perror("Failed to set foreground process for shell\n");
         }
+        return MAGIC_BUILDIN;
+    }
+    if((strcmp(argv_store[0],"bg") == 0))
+    {
+        kill(-PGs_table.back(),SIGCONT);
+        PGs_cmd.pop_back();
+        PGs_table.pop_back();
         return MAGIC_BUILDIN;
     }
     pid_t pid;
