@@ -8,9 +8,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "glob.h"
-#include <string.h>
+#include <string>
 #include <stdint.h>
 #include <vector>
+#include <iostream>
 
 
 #define MAX_ARGC              256
@@ -39,6 +40,7 @@ glob_t glob_result;
 
 std::vector<pid_t> PGs_table;
 uint32_t curr_PG;
+std::vector<std::string> PGs_cmd;
 #define SHELL_PG_IDX    0
 
 void KillChildren(int Signal){
@@ -137,7 +139,6 @@ static void do_environVar(char *cmd,char *arg)
         int overwrite = 1;
         char *var_value = strtok(NULL,"=");
         setenv(var_name, var_value, overwrite);
-        //printf("name=%s, val=%s\n",var_name,var_value);
     }else//unset
     {
         //Usage: unset VAR_NAME
@@ -150,6 +151,14 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
     if((strcmp(argv_store[0],"export") == 0)||(strcmp(argv_store[0],"unset") == 0))
     {
         do_environVar(argv_store[0], argv_store[1]);
+        return MAGIC_BUILDIN;
+    }
+    if((strcmp(argv_store[0],"jobs") == 0))
+    {
+        for(uint32_t i = SHELL_PG_IDX+1;i < PGs_table.size();i++)
+        {
+            printf("[%d]  Stopped  pgid=%d       %s",i,PGs_table[i],PGs_cmd[i].c_str());
+        }
         return MAGIC_BUILDIN;
     }
     pid_t pid;
@@ -205,10 +214,12 @@ static void run(char *cmd)
     int cmd_idx = 0;
     int cmd_offset = 0;
     parse_end = 0;
+    BACKGROUND_MODE = 0;
     if( sigprocmask(SIG_BLOCK, &SignalSet, NULL) == -1 )
     {
 			perror("Failed to change signal mask.");
 	}
+    PGs_cmd.push_back(cmd);
     while(cmd_offset += parser(cmd+cmd_offset, &argc_store[cmd_idx], argv_store[cmd_idx]))
     {
         /*Managing multiple commands relative variable*/
@@ -279,9 +290,10 @@ static void run(char *cmd)
 	        {
 		        perror("Failed to set foreground process for command");
             }
-            BACKGROUND_MODE = 0;
             int status;
             waitpid(pid, &status, 0);
+            PGs_cmd.pop_back();
+            PGs_table.pop_back();
         }
 	    if( tcsetpgrp(STDIN_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
 	        tcsetpgrp(STDOUT_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
@@ -292,7 +304,7 @@ static void run(char *cmd)
         curr_PG++;
     }else//shell build-in
     {
-        //do nothing
+        PGs_cmd.pop_back();
     }
 }
 
@@ -325,7 +337,7 @@ int main(void)
         perror("getcwd() error");
     }
     
-    size_t buf_len = 1024;
+    size_t buf_len = 2048;
     char *cmd_buf = (char*)malloc(buf_len);
     if( cmd_buf == NULL)
     {
@@ -337,7 +349,9 @@ int main(void)
         perror("Shell failed to become new pg");
     }
     PGs_table.clear();
+    PGs_cmd.clear();
     PGs_table.push_back(getpid());//first pid is also the pgid
+    PGs_cmd.push_back("shell-prompt");
     curr_PG = SHELL_PG_IDX + 1;
     while(1)
     {
@@ -345,6 +359,7 @@ int main(void)
 		fflush(NULL);
         getline(&cmd_buf, &buf_len, stdin);
         run(cmd_buf);
+        memset(cmd_buf,0,buf_len);
     }
     free(cmd_buf);
 }
