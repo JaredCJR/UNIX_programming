@@ -9,6 +9,9 @@
 #include <fcntl.h>
 #include "glob.h"
 #include <string.h>
+#include <stdint.h>
+#include <vector>
+
 
 #define MAX_ARGC              256
 #define MAX_PIPE_NUM           20
@@ -16,7 +19,7 @@
 #define PIPE_IN_FD              0
 #define PIPE_OUT_FD             1
 
-#define MAX_PG                300
+#define MAX_PG                200
 
 #define MAGIC_BUILDIN     -109487
 #define MAGIC_INVALID_CMD -999487
@@ -29,22 +32,20 @@ pid_t pid_array[MAX_PIPE_NUM] = {-1};
 int BACKGROUND_MODE = 0;
 char cwd[1024];
 
-pid_t shell_pgid;
-pid_t shell_pid;
 int parse_end = 0;
 volatile int core_dump = 0;
-pid_t pgid_map[MAX_PG] = {0};
-int PGID_MAP_IDX = 0;
 sigset_t SignalSet;
 glob_t glob_result;
 
-int orig_sigint_handler;
-int orig_sigquit_handler;
+std::vector<pid_t> PGs_table;
+uint32_t curr_PG;
+#define SHELL_PG_IDX    0
 
 void KillChildren(int Signal){
-	if( kill(-pgid_map[PGID_MAP_IDX], Signal) == -1 )
+	if( kill(-PGs_table.back(), Signal) == -1 )
 		perror("Failed to kill children");
-
+    PGs_table.pop_back();
+    curr_PG--;
 }
 
 static void redirect_input(char *fname)
@@ -144,7 +145,7 @@ static void do_environVar(char *cmd,char *arg)
     }
 }
 
-static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first,pid_t pgid_idx)
+static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is_first)
 {
     if((strcmp(argv_store[0],"export") == 0)||(strcmp(argv_store[0],"unset") == 0))
     {
@@ -160,10 +161,9 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
             {
                 perror("setpgid failed");
             }
-            pgid_map[pgid_idx] = getpgid(0);
         }else
         {
-            if(setpgid(0,pgid_map[pgid_idx]))
+            if(setpgid(0,PGs_table.back()))
             {
                 perror("setpgid failed");
             }
@@ -189,7 +189,7 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
         }
     }else if(pid > 0 && is_first)
     {
-       pgid_map[pgid_idx] = pid; 
+       PGs_table.push_back(pid); 
     }
     globfree(&glob_result);
     return pid;//child never comes here
@@ -222,11 +222,10 @@ static void run(char *cmd)
     /*fork pipeline*/
     int pipe_fd[2];
     int in = STDIN_FILENO;
-    int pgid_save = PGID_MAP_IDX;
     for(int i = 0;i < cmd_idx;i++)//the last command should output to the original STDOUT_FILENO
     {
         pipe(pipe_fd);
-        sub_command(in,pipe_fd[PIPE_OUT_FD],argv_store[i],i==0,pgid_save);
+        sub_command(in,pipe_fd[PIPE_OUT_FD],argv_store[i],i==0);
         close(pipe_fd[PIPE_OUT_FD]);
         in = pipe_fd[PIPE_IN_FD];
     }
@@ -254,7 +253,7 @@ static void run(char *cmd)
         {
             exit(EXIT_SUCCESS);
         }
-        pid = sub_command(in,STDOUT_FILENO,argv_store[cmd_idx],cmd_idx==0,pgid_save);
+        pid = sub_command(in,STDOUT_FILENO,argv_store[cmd_idx],cmd_idx==0);
     }
     if( sigprocmask(SIG_UNBLOCK, &SignalSet, NULL) == -1 )
     {
@@ -274,9 +273,9 @@ static void run(char *cmd)
         }
         if(!BACKGROUND_MODE)
         {
-	        if( tcsetpgrp(STDIN_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
-	            tcsetpgrp(STDOUT_FILENO, pgid_map[PGID_MAP_IDX]) == -1 ||
-	            tcsetpgrp(STDERR_FILENO, pgid_map[PGID_MAP_IDX]) == -1 )
+	        if( tcsetpgrp(STDIN_FILENO, PGs_table.back()) == -1 ||
+	            tcsetpgrp(STDOUT_FILENO, PGs_table.back()) == -1 ||
+	            tcsetpgrp(STDERR_FILENO, PGs_table.back()) == -1 )
 	        {
 		        perror("Failed to set foreground process for command");
             }
@@ -284,13 +283,13 @@ static void run(char *cmd)
             int status;
             waitpid(pid, &status, 0);
         }
-	    if( tcsetpgrp(STDIN_FILENO, shell_pgid) == -1 ||
-	        tcsetpgrp(STDOUT_FILENO, shell_pgid) == -1 ||
-	        tcsetpgrp(STDERR_FILENO, shell_pgid) == -1 )
+	    if( tcsetpgrp(STDIN_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
+	        tcsetpgrp(STDOUT_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
+	        tcsetpgrp(STDERR_FILENO, PGs_table[SHELL_PG_IDX]) == -1 )
 	    {
 	        perror("Failed to set foreground process for shell\n");
         }
-        PGID_MAP_IDX++;
+        curr_PG++;
     }else//shell build-in
     {
         //do nothing
@@ -325,8 +324,7 @@ int main(void)
     {
         perror("getcwd() error");
     }
-
-    PGID_MAP_IDX = 0;
+    
     size_t buf_len = 1024;
     char *cmd_buf = (char*)malloc(buf_len);
     if( cmd_buf == NULL)
@@ -338,8 +336,9 @@ int main(void)
     {
         perror("Shell failed to become new pg");
     }
-    shell_pgid = getpgid(0);
-    shell_pid = getpid();
+    PGs_table.clear();
+    PGs_table.push_back(getpid());//first pid is also the pgid
+    curr_PG = SHELL_PG_IDX + 1;
     while(1)
     {
         printf("shell-prompt$ ");
