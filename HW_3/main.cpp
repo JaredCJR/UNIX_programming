@@ -35,7 +35,6 @@ char cwd[1024];
 int WaitForChildren = 1;
 
 int parse_end = 0;
-volatile int core_dump = 0;
 sigset_t SignalSet;
 glob_t glob_result;
 
