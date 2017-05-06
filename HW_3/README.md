@@ -12,6 +12,13 @@ make
 ./hw3
 ```
 
+How to exit the shell:
+================================
+"Ctrl + c" , "Ctrl + \" , "Ctrl + z" are handled,so you can type "exit" to exit.
+```
+shell-prompt$ exit
+```
+
 [10%] Execute a single command.
 ---------------------------------------------
 Ex.
@@ -102,7 +109,7 @@ shell-prompt$ fg
 * Test "&" background execution
 ```
 shell-prompt$ find / &
-(You will not able to control "find" with your keyboard)
+(You will not be able to control "find" with your keyboard)
 ```
 
 
