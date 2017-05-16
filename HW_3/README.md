@@ -14,7 +14,7 @@ make
 
 How to exit the shell:
 ================================
-"Ctrl + c" , "Ctrl + \" , "Ctrl + z" are handled,so you can type "exit" to exit.
+"Ctrl + c" , "Ctrl + \\" , "Ctrl + z" are handled, so you need to type "exit" to exit.
 ```
 shell-prompt$ exit
 ```
