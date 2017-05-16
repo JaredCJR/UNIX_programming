@@ -39,6 +39,7 @@ sigset_t SignalSet;
 glob_t glob_result;
 
 std::vector<pid_t> PGs_table;
+std::vector<std::vector<int>> PGs_count;
 uint32_t curr_PG;
 std::vector<std::string> PGs_cmd;
 #define SHELL_PG_IDX    0
@@ -52,6 +53,7 @@ void KillChildren(int Signal)
 		    perror("Failed to kill children");
         }
         PGs_table.pop_back();
+        PGs_count.pop_back();
         curr_PG--;
     }
 }
@@ -199,11 +201,15 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
 	    {
 		    perror("Failed to set foreground process for command");
         }
-        waitpid(PGs_table.back(), &status, WUNTRACED);
+        for(int i = 0;i < PGs_count.back().size();i++)
+        {
+            waitpid(PGs_count.back()[i], &status, 0);
+        }
         if(!WIFSTOPPED(status))
         {
             PGs_cmd.pop_back();
             PGs_table.pop_back();
+            PGs_count.pop_back();
         }
 	    if( tcsetpgrp(STDIN_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
 	        tcsetpgrp(STDOUT_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
@@ -218,6 +224,7 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
         kill(-PGs_table.back(),SIGCONT);
         PGs_cmd.pop_back();
         PGs_table.pop_back();
+        PGs_count.pop_back();
         return MAGIC_BUILDIN;
     }
     pid_t pid;
@@ -257,7 +264,13 @@ static pid_t sub_command(int fd_in,int fd_out,char *argv_store[MAX_ARGC], int is
         }
     }else if(pid > 0 && is_first)
     {
-       PGs_table.push_back(pid); 
+       PGs_table.push_back(pid);
+       std::vector<int> tmp;
+       tmp.push_back(1);
+       PGs_count.push_back(tmp);
+    }else if(pid > 0)
+    {
+        PGs_count.back().push_back(pid);
     }
     globfree(&glob_result);
     return pid;//child never comes here
@@ -365,6 +378,7 @@ static void run(char *cmd)
             {
                 PGs_cmd.pop_back();
                 PGs_table.pop_back();
+                PGs_count.pop_back();
             }
         }
 	    if( tcsetpgrp(STDIN_FILENO, PGs_table[SHELL_PG_IDX]) == -1 ||
@@ -424,8 +438,12 @@ int main(void)
         perror("Shell failed to become new pg");
     }
     PGs_table.clear();
+    PGs_count.clear();
     PGs_cmd.clear();
     PGs_table.push_back(getpid());//first pid is also the pgid
+    std::vector<int> tmp;
+    tmp.push_back(1);
+    PGs_count.push_back(tmp);
     PGs_cmd.push_back("shell-prompt");
     curr_PG = SHELL_PG_IDX + 1;
     while(1)

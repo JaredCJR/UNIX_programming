@@ -106,10 +106,21 @@ shell-prompt$ fg
 (bring back "less /etc/passwd" into foreground)
 ```
 
+Another example:
+```
+shell-prompt$ cat /etc/passwd | cat | cat | cat | less
+(press ctrl+z)
+shell-prompt$ jobs
+[1]  Stopped  pgid=5001       cat /etc/passwd | cat | cat | cat | less
+shell-prompt$ fg
+(bring back "cat /etc/passwd | cat | cat | cat | less")
+```
+
+
 * Test "&" background execution
 ```
 shell-prompt$ find / &
-(You will not be able to control "find" with your keyboard)
+(You will not be able to control "find" with your keyboard<ctrl+c,ctrl+z,ctrl+\>)
 ```
 
 
