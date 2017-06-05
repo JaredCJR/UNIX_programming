@@ -1,144 +1,225 @@
-#include "othello.h"
+#include "othello_lib.h"
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <string.h>
+#include <stdlib.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <stdint.h>
+#include <errno.h>
+#include <arpa/inet.h> 
 
-#define	PLAYER1SYM	('O')
-#define	PLAYER2SYM	('X')
+static int width;
+static int height;
+static int cx = 3;
+static int cy = 3;
 
-int board[BOARDSZ][BOARDSZ];
+char localip[] = "127.0.0.1";
+//http://www.thegeekstuff.com/2011/12/c-socket-programming/?utm_source=feedburner
+static int server_connect(char *p)
+{
+    uint32_t port;
+    sscanf(p, "%d", &port);
 
-static int const box_top = 1;
-static int const box_left = 2;
-static int const boxwidth = 3;
+    int listenfd = 0, connfd = 0;
+    struct sockaddr_in serv_addr; 
+    char sendBuff[1025];
 
-static int use_color = 0;
-static int colorborder;
-static int colorplayer1;
-static int colorplayer2;
-static int colorcursor;
-static int colormsgwarn;
-static int colormsgok;
+    listenfd = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&serv_addr, '0', sizeof(serv_addr));
+    memset(sendBuff, '0', sizeof(sendBuff)); 
 
-void
-init_board() {
-	bzero(board, sizeof(board));
-	board[3][3] = board[4][4] = PLAYER1;
-	board[3][4] = board[4][3] = PLAYER2;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_port = htons(port); 
+    bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
+
+    listen(listenfd, 10);
+    connfd = accept(listenfd, (struct sockaddr*)NULL, NULL); 
+    while(1)
+    {
+        snprintf(sendBuff, sizeof(sendBuff), "%s", "Server\n");
+        write(connfd, sendBuff, strlen(sendBuff));
+        sleep(1);
+    }
+    close(connfd);
+    return 0;
 }
 
-void
-init_colors() {
-	int coloridx = 0;	// color idx 0 is default color
-	if(has_colors() == FALSE)
-		return;
-	start_color();
-	//
-	colorborder = ++coloridx;
-	init_pair(colorborder, COLOR_WHITE, COLOR_BLACK);
+static int client_connect(char *d)
+{
+    /*parse ip and port*/
+    char *ip, *port_ch;
+    uint32_t port;
+    ip = strtok (d,":");
+    if(strcmp(ip,"localhost") == 0)
+    {
+        ip = localip;
+    }
+    port_ch = strtok (NULL, ":");
+    sscanf(port_ch, "%d", &port);
 
-	colorplayer1 = ++coloridx;
-	init_pair(colorplayer1, COLOR_BLACK, COLOR_GREEN);
+    /*setup socket*/
+    int sockfd = 0, n = 0;
+    char recvBuff[1024];
+    struct sockaddr_in serv_addr; 
 
-	colorplayer2 = ++coloridx;
-	init_pair(colorplayer2, COLOR_BLACK, COLOR_MAGENTA);
+    memset(recvBuff, '0',sizeof(recvBuff));
+    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        printf("\n Error : Could not create socket \n");
+        return 1;
+    } 
 
-	colorcursor = ++coloridx;
-	init_pair(colorcursor, COLOR_YELLOW, COLOR_BLACK);
+    memset(&serv_addr, '0', sizeof(serv_addr)); 
 
-	colormsgwarn = ++coloridx;
-	init_pair(colormsgwarn, COLOR_RED, COLOR_BLACK);
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port); 
 
-	colormsgok = ++coloridx;
-	init_pair(colormsgok, COLOR_GREEN, COLOR_BLACK);
-	//
-	use_color = 1;
-	return;
+    if(inet_pton(AF_INET, ip, &serv_addr.sin_addr)<=0)
+    {
+        printf("\n inet_pton error occured\n");
+        return 1;
+    } 
+
+    if( connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    {
+       printf("\n Error : Connect Failed \n");
+       return 1;
+    } 
+
+    while ( (n = read(sockfd, recvBuff, sizeof(recvBuff)-1)) > 0)
+    {
+        recvBuff[n] = 0;
+        if(fputs(recvBuff, stdout) == EOF)
+        {
+            printf("\n Error : Fputs error\n");
+        }
+    } 
+
+    if(n < 0)
+    {
+        printf("\n Read error \n");
+    } 
+    return 0;
 }
 
-static chtype
-BCH(int x, int y) {
-	if(board[y][x] == PLAYER1) return PLAYER1SYM|COLOR_PAIR(colorplayer1);
-	if(board[y][x] == PLAYER2) return PLAYER2SYM|COLOR_PAIR(colorplayer2);
-	return ' ';
-}
+int
+main(int argc, char* argv[])
+{
+    char r;
+    if((r = getopt(argc, argv, "s:c:")) != -1)
+    {
+        switch(r)
+        {
+            case 's':
+                server_connect(optarg);
+                break;
+            case 'c':
+                client_connect(optarg);
+                break;
+            default:
+                break;
+        }
+    }
 
-static void
-draw_box(int x, int y, int ch, int color, int highlight) {
-	int i;
-	attron(highlight ? A_BOLD : A_NORMAL);
-	attron(COLOR_PAIR(color));
-	//
-	move(box_top + y*2 + 0, box_left + x*(boxwidth+1));
-	if(y == 0) addch(x == 0 ? ACS_ULCORNER : ACS_TTEE);
-	else       addch(x == 0 ? ACS_LTEE : ACS_PLUS);
-	for(i = 0; i < boxwidth; i++) addch(ACS_HLINE);
-	if(y == 0) addch(x+1 == BOARDSZ ? ACS_URCORNER : ACS_TTEE);
-	else       addch(x+1 == BOARDSZ ? ACS_RTEE : ACS_PLUS);
-	//
-	move(box_top + y*2 + 1, box_left + x*(boxwidth+1));
-	addch(ACS_VLINE);
-	for(i = 0; i < boxwidth/2; i++) addch(' ');
-	addch(ch);
-	for(i = 0; i < boxwidth/2; i++) addch(' ');
-	addch(ACS_VLINE);
-	//
-	move(box_top + y*2 + 2, box_left + x*(boxwidth+1));
-	if(y+1 == BOARDSZ) addch(x == 0 ? ACS_LLCORNER : ACS_BTEE);
-	else               addch(x == 0 ? ACS_LTEE : ACS_PLUS);
-	for(i = 0; i < boxwidth; i++) addch(ACS_HLINE);
-	if(y+1 == BOARDSZ) addch(x+1 == BOARDSZ ? ACS_LRCORNER : ACS_BTEE);
-	else               addch(x+1 == BOARDSZ ? ACS_RTEE : ACS_PLUS);
-	//
-	attroff(COLOR_PAIR(color));
-	attroff(highlight ? A_BOLD : A_NORMAL);
-}
+    while(1)
+    {
+        
+    }
 
-void
-draw_message(const char *msg, int highlight) {
-	move(0, 0);
-	attron(highlight ? A_BLINK : A_NORMAL);
-	attron(COLOR_PAIR(highlight ? colormsgwarn : colormsgok));
-	printw(msg);
-	attroff(COLOR_PAIR(highlight ? colormsgwarn : colormsgok));
-	attroff(highlight ? A_BLINK : A_NORMAL);
-	return;
-}
+	initscr();			// start curses mode 
+	getmaxyx(stdscr, height, width);// get screen size
 
-void
-draw_cursor(int x, int y, int show) {
-	draw_box(x, y, BCH(x, y), show ? colorcursor : colorborder, show);
-	return;
-}
+	cbreak();			// disable buffering
+					// - use raw() to disable Ctrl-Z and Ctrl-C as well,
+	halfdelay(1);			// non-blocking getch after n * 1/10 seconds
+	noecho();			// disable echo
+	keypad(stdscr, TRUE);		// enable function keys and arrow keys
+	curs_set(0);			// hide the cursor
 
-void
-draw_board() {
-	int i, j;
-	for(i = 0; i < BOARDSZ; i++) {
-		for(j = 0; j < BOARDSZ; j++) {
-			draw_box(i, j, BCH(i, j), colorborder, 0);
-		}
-	}
-	return;
-}
+	init_colors();
 
-void
-draw_score() {
-	int i, j;
-	int black = 0, white = 0;
-	for(i = 0; i < BOARDSZ; i++) {
-		for(j = 0; j < BOARDSZ; j++) {
-			if(board[i][j] == PLAYER1) white++;
-			if(board[i][j] == PLAYER2) black++;
-		}
-	}
+restart:
+	clear();
+	cx = cy = 3;
+	init_board();
+	draw_board();
+	draw_cursor(cx, cy, 1);
+	draw_score();
+	refresh();
+
 	attron(A_BOLD);
-	move(box_top+3, box_left + 4*BOARDSZ + 10);
-	printw("Player #1 ");
-	addch(PLAYER1SYM|COLOR_PAIR(colorplayer1));
-	printw(" : %d", white);
-	move(box_top+5, box_left + 4*BOARDSZ + 10);
-	printw("Player #2 ");
-	addch(PLAYER2SYM|COLOR_PAIR(colorplayer2));
-	printw(" : %d", black);
+	move(height-1, 0);	printw("Arrow keys: move; Space: put GREEN; Return: put PURPLE; R: reset; Q: quit");
 	attroff(A_BOLD);
-	return;
-}
 
+	while(true) {			// main loop
+		int ch = getch();
+		int moved = 0;
+
+		switch(ch) {
+		case ' ':
+			board[cy][cx] = PLAYER1;
+			draw_cursor(cx, cy, 1);
+			draw_score();
+			break;
+		case 0x0d:
+		case 0x0a:
+		case KEY_ENTER:
+			board[cy][cx] = PLAYER2;
+			draw_cursor(cx, cy, 1);
+			draw_score();
+			break;
+		case 'q':
+		case 'Q':
+			goto quit;
+			break;
+		case 'r':
+		case 'R':
+			goto restart;
+			break;
+		case 'k':
+		case KEY_UP:
+			draw_cursor(cx, cy, 0);
+			cy = (cy-1+BOARDSZ) % BOARDSZ;
+			draw_cursor(cx, cy, 1);
+			moved++;
+			break;
+		case 'j':
+		case KEY_DOWN:
+			draw_cursor(cx, cy, 0);
+			cy = (cy+1) % BOARDSZ;
+			draw_cursor(cx, cy, 1);
+			moved++;
+			break;
+		case 'h':
+		case KEY_LEFT:
+			draw_cursor(cx, cy, 0);
+			cx = (cx-1+BOARDSZ) % BOARDSZ;
+			draw_cursor(cx, cy, 1);
+			moved++;
+			break;
+		case 'l':
+		case KEY_RIGHT:
+			draw_cursor(cx, cy, 0);
+			cx = (cx+1) % BOARDSZ;
+			draw_cursor(cx, cy, 1);
+			moved++;
+			break;
+		}
+
+		if(moved) {
+			refresh();
+			moved = 0;
+		}
+
+		napms(1);		// sleep for 1ms
+	}
+
+quit:
+	endwin();			// end curses mode
+
+	return 0;
+}

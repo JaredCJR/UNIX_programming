@@ -1,5 +1,5 @@
-#ifndef __OTHELLO_H__
-#define	__OTHELLO_H__
+#ifndef __OTHELLO_LIB_H__
+#define	__OTHELLO_LIB_H__
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -21,4 +21,4 @@ void draw_cursor(int x, int y, int hide);
 void draw_board();
 void draw_score();
 
-#endif	/* __OTHELLO_H__ */
+#endif	/* __OTHELLO_LIB_H__ */
