@@ -19,7 +19,8 @@ pthread_mutex_t start_lock;
 pthread_mutex_t conn_lock;
 pthread_mutex_t play_lock;
 #define MAGIC    "9487"
-#define RESTART_MAGIC  "9487_RESTART"
+#define RESTART_MAGIC  "94_RESTART"
+#define QUIT_MAGIC   "94_QUIT"
 
 typedef struct {
     int is_start;
@@ -29,6 +30,7 @@ typedef struct {
     int pos_y;
     int need_update;
     int need_restart;
+    int need_quit;
 }game_comm;
 
 game_comm comm = { 0 };
@@ -59,8 +61,22 @@ static void update(char *input)
 {
     char deli[] = ",";
     char *magic, *player, *x, *y;
+    if(comm.need_quit == 1)
+    {
+        return;
+    }
     magic = strtok (input,deli);
-    if(strcmp(magic,MAGIC) == 0)
+    if(strcmp(magic, RESTART_MAGIC) == 0)
+    {
+        pthread_mutex_lock(&play_lock);
+        comm.need_restart = 1;
+        pthread_mutex_unlock(&play_lock);
+    }else if(strcmp(magic, QUIT_MAGIC) == 0)
+    {
+        pthread_mutex_lock(&play_lock);
+        comm.need_quit = 1;
+        pthread_mutex_unlock(&play_lock);
+    }else if(strcmp(magic,MAGIC) == 0)
     {
         player = strtok (NULL, deli);
         x = strtok (NULL, deli);
@@ -72,12 +88,9 @@ static void update(char *input)
         sscanf(y, "%d", &comm.pos_y);
         comm.need_update = 1;
         pthread_mutex_unlock(&play_lock);
-    }
-    if(strcmp(magic, RESTART_MAGIC) == 0)
+    }else
     {
-        pthread_mutex_lock(&play_lock);
-        comm.need_restart = 1;
-        pthread_mutex_unlock(&play_lock);
+        fprintf(stderr,"UNKNOWN cmd\n");
     }
 }
 
@@ -154,9 +167,21 @@ restart:
             pthread_mutex_unlock(&play_lock);
             goto restart;
         }
+        if(com->need_quit == 1)
+        {
+            pthread_mutex_unlock(&play_lock);
+            goto quit;
+        }
         pthread_mutex_unlock(&play_lock);
 		int ch = getch();
 		int moved = 0;
+        pthread_mutex_lock(&play_lock);
+        if(com->need_quit == 1)
+        {
+            pthread_mutex_unlock(&play_lock);
+            goto quit;
+        }
+        pthread_mutex_unlock(&play_lock);
 
 		switch(ch) {
 		case ' ':
@@ -191,6 +216,10 @@ restart:
 			break;
 		case 'q':
 		case 'Q':
+            pthread_mutex_lock(&play_lock);
+            snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", QUIT_MAGIC, 0, 0, 0);
+            sock_write(targetFD,sendBuff);
+            pthread_mutex_unlock(&play_lock);
 			goto quit;
 			break;
 		case 'r':
@@ -240,12 +269,8 @@ restart:
 	}
 
 quit:
+    com->lost_con = 1;
 	endwin();			// end curses mode
-
-    pthread_mutex_lock(&conn_lock);
-    comm.lost_con = 1;
-    pthread_mutex_unlock(&conn_lock);
-
 	return 0;
 }
 
@@ -314,8 +339,10 @@ static int server_connect(char *p)
         else if(count >= 0) {
             // Otherwise, you're good to go and buffer should contain "count" bytes.
             recvBuff[count] = 0;
-            update(recvBuff);
             fwrite(recvBuff, sizeof(char), count, log);
+            update(recvBuff);
+            fflush(stdout);
+            fflush(log);
         }
         else {
             // Some other error occurred during read.
@@ -323,9 +350,11 @@ static int server_connect(char *p)
             comm.lost_con = 1;
             pthread_mutex_unlock(&conn_lock);
             perror("Read error:");
+            break;
         }
     }
     close(connfd);
+    close(listenfd);
     fclose(log);
     return 0;
 }
@@ -414,8 +443,10 @@ static int client_connect(char *d)
         else if(count >= 0) {
             // Otherwise, you're good to go and buffer should contain "count" bytes.
             recvBuff[count] = 0;
-            update(recvBuff);
             fwrite(recvBuff, sizeof(char), count+1, log);
+            update(recvBuff);
+            fflush(stdout);
+            fflush(log);
         }
         else {
             // Some other error occurred during read.
@@ -423,6 +454,7 @@ static int client_connect(char *d)
             comm.lost_con = 1;
             pthread_mutex_unlock(&conn_lock);
             perror("Read error:");
+            break;
         }
     }
     close(sockfd);

@@ -6,6 +6,9 @@ PROGS	= othello
 
 all: $(PROGS)
 
+gdb_client: $(PROGS)
+	gdbtui --args ./$(PROGS) -c localhost:12345
+
 $(PROGS): othello.o othello_lib.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
