@@ -13,5 +13,5 @@ $(PROGS): othello.o othello_lib.o
 	$(CC) -c $(CFLAGS) $<
 
 clean:
-	rm -f *.o *~ $(PROGS)
+	rm -f *.o *~ $(PROGS) *_log.txt
 
