@@ -17,15 +17,69 @@
 pthread_t tid[1];
 pthread_mutex_t start_lock;
 pthread_mutex_t conn_lock;
+pthread_mutex_t play_lock;
+#define MAGIC    "9487"
+#define RESTART_MAGIC  "9487_RESTART"
 
 typedef struct {
     int is_start;
     int lost_con;
+    int player;
+    int pos_x;
+    int pos_y;
+    int need_update;
+    int need_restart;
 }game_comm;
 
 game_comm comm = { 0 };
+int targetFD;
+int I_AM;
 
 char localip[] = "127.0.0.1";
+
+static void sock_write(int fd,char *sendBuff)
+{
+    int count = write(fd, sendBuff, strlen(sendBuff));
+    if(count < 0 && errno == EAGAIN) {
+        // If this condition passes, the data is writing
+    }
+    else if(count >= 0) {
+        // Otherwise, write "count" bytes.
+    }
+    else {
+        // Some other error occurred during read.
+        pthread_mutex_lock(&conn_lock);
+        comm.lost_con = 1;
+        pthread_mutex_unlock(&conn_lock);
+        perror("write error:");
+    }
+}
+
+static void update(char *input)
+{
+    char deli[] = ",";
+    char *magic, *player, *x, *y;
+    magic = strtok (input,deli);
+    if(strcmp(magic,MAGIC) == 0)
+    {
+        player = strtok (NULL, deli);
+        x = strtok (NULL, deli);
+        y = strtok (NULL, deli);
+
+        pthread_mutex_lock(&play_lock);
+        sscanf(player, "%d", &comm.player);
+        sscanf(x, "%d", &comm.pos_x);
+        sscanf(y, "%d", &comm.pos_y);
+        comm.need_update = 1;
+        pthread_mutex_unlock(&play_lock);
+    }
+    if(strcmp(magic, RESTART_MAGIC) == 0)
+    {
+        pthread_mutex_lock(&play_lock);
+        comm.need_restart = 1;
+        pthread_mutex_unlock(&play_lock);
+    }
+}
 
 static int play_game(game_comm *com)
 {
@@ -34,9 +88,9 @@ static int play_game(game_comm *com)
     int cx = 3;
     int cy = 3;
 
+    printf("Waiting...\n");
     while(1)
     {
-        printf("Waiting...\n");
         pthread_mutex_lock(&start_lock);
         if(com->is_start == 1)
         {
@@ -45,6 +99,8 @@ static int play_game(game_comm *com)
         }
         pthread_mutex_unlock(&start_lock);
     }
+    char sendBuff[1024];
+    memset(sendBuff, '0', sizeof(sendBuff)); 
 
 	initscr();			// start curses mode 
 	getmaxyx(stdscr, height, width);// get screen size
@@ -59,6 +115,8 @@ static int play_game(game_comm *com)
 	init_colors();
 
 restart:
+    com->player = PLAYER1;
+    com->need_restart = 0;
 	clear();
 	cx = cy = 3;
 	init_board();
@@ -79,21 +137,57 @@ restart:
             goto quit;
         }
         pthread_mutex_unlock(&conn_lock);
+        //update from sender
+        pthread_mutex_lock(&play_lock);
+        if(com->need_update == 1)
+        {
+			board[com->pos_y][com->pos_x] = com->player;
+			draw_cursor(com->pos_x, com->pos_y, 1);
+			draw_score();
+            com->need_update = 0;
+            com->player = I_AM;
+        }
+        pthread_mutex_unlock(&play_lock);
+        pthread_mutex_lock(&play_lock);
+        if(com->need_restart == 1)
+        {
+            pthread_mutex_unlock(&play_lock);
+            goto restart;
+        }
+        pthread_mutex_unlock(&play_lock);
 		int ch = getch();
 		int moved = 0;
 
 		switch(ch) {
 		case ' ':
-			board[cy][cx] = PLAYER1;
-			draw_cursor(cx, cy, 1);
-			draw_score();
+            pthread_mutex_lock(&play_lock);
+            if((I_AM == PLAYER1) && (com->player == PLAYER1))
+            {
+			    board[cy][cx] = PLAYER1;
+			    draw_cursor(cx, cy, 1);
+			    draw_score();
+
+                com->player = PLAYER2;//next round is P2
+                snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER1, cx, cy);
+                sock_write(targetFD,sendBuff);
+            }
+            pthread_mutex_unlock(&play_lock);
 			break;
 		case 0x0d:
 		case 0x0a:
 		case KEY_ENTER:
-			board[cy][cx] = PLAYER2;
-			draw_cursor(cx, cy, 1);
-			draw_score();
+            pthread_mutex_lock(&play_lock);
+            if((I_AM == PLAYER2) && (com->player == PLAYER2))
+            {
+			    board[cy][cx] = PLAYER2;
+			    draw_cursor(cx, cy, 1);
+			    draw_score();
+
+                com->player = PLAYER1;//next round is P1
+                snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER2, cx, cy);
+                sock_write(targetFD,sendBuff);
+            }
+            pthread_mutex_unlock(&play_lock);
 			break;
 		case 'q':
 		case 'Q':
@@ -101,6 +195,10 @@ restart:
 			break;
 		case 'r':
 		case 'R':
+            pthread_mutex_lock(&play_lock);
+            snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", RESTART_MAGIC, 0, 0, 0);
+            sock_write(targetFD,sendBuff);
+            pthread_mutex_unlock(&play_lock);
 			goto restart;
 			break;
 		case 'k':
@@ -151,27 +249,11 @@ quit:
 	return 0;
 }
 
-static void sock_write(int fd,char *sendBuff)
-{
-    int count = write(fd, sendBuff, strlen(sendBuff));
-    if(count < 0 && errno == EAGAIN) {
-        // If this condition passes, the data is writing
-    }
-    else if(count >= 0) {
-        // Otherwise, write "count" bytes.
-    }
-    else {
-        // Some other error occurred during read.
-        pthread_mutex_lock(&conn_lock);
-        comm.lost_con = 1;
-        pthread_mutex_unlock(&conn_lock);
-        perror("write error:");
-    }
-}
 
 //http://www.thegeekstuff.com/2011/12/c-socket-programming/?utm_source=feedburner
 static int server_connect(char *p)
 {
+    I_AM = PLAYER1;
     uint32_t port;
     sscanf(p, "%d", &port);
 
@@ -188,7 +270,8 @@ static int server_connect(char *p)
 
     listen(listenfd, 10);
     printf("Waiting for a client on port %d ...\n",port);
-    connfd = accept(listenfd, (struct sockaddr*)NULL, NULL); 
+    connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
+    comm.player = PLAYER1;
     int err = pthread_create(&tid[0], NULL, (void*)&play_game, &comm);
     if (err != 0)
     {
@@ -209,6 +292,7 @@ static int server_connect(char *p)
     	perror("fcntl failed:");
     }
     int count;
+    targetFD = connfd;
     while(1)
     {
         if(comm.lost_con == 1)
@@ -217,8 +301,10 @@ static int server_connect(char *p)
         }
 
         //write
+        /*
         snprintf(sendBuff, sizeof(sendBuff), "%s", "ack from server\n");
         sock_write(connfd,sendBuff);
+        */
 
         //read
         count = read(connfd, recvBuff, sizeof(recvBuff)-1);
@@ -228,7 +314,7 @@ static int server_connect(char *p)
         else if(count >= 0) {
             // Otherwise, you're good to go and buffer should contain "count" bytes.
             recvBuff[count] = 0;
-
+            update(recvBuff);
             fwrite(recvBuff, sizeof(char), count, log);
         }
         else {
@@ -238,7 +324,6 @@ static int server_connect(char *p)
             pthread_mutex_unlock(&conn_lock);
             perror("Read error:");
         }
-        sleep(1);
     }
     close(connfd);
     fclose(log);
@@ -247,6 +332,7 @@ static int server_connect(char *p)
 
 static int client_connect(char *d)
 {
+    I_AM = PLAYER2;
     /*parse ip and port*/
     char *ip, *port_ch;
     uint32_t port;
@@ -292,6 +378,7 @@ static int client_connect(char *d)
     }
 
     FILE *log = fopen("client_log.txt","w");
+    targetFD = sockfd;
 
     pthread_mutex_lock(&start_lock);
     comm.is_start = 1;
@@ -314,8 +401,10 @@ static int client_connect(char *d)
         }
 
         //write
+        /*
         snprintf(sendBuff, sizeof(sendBuff), "%s", "ack from client\n");
         sock_write(sockfd,sendBuff);
+        */
 
         //read
         count = read(sockfd, recvBuff, sizeof(recvBuff)-1);
@@ -325,6 +414,7 @@ static int client_connect(char *d)
         else if(count >= 0) {
             // Otherwise, you're good to go and buffer should contain "count" bytes.
             recvBuff[count] = 0;
+            update(recvBuff);
             fwrite(recvBuff, sizeof(char), count+1, log);
         }
         else {
@@ -334,7 +424,6 @@ static int client_connect(char *d)
             pthread_mutex_unlock(&conn_lock);
             perror("Read error:");
         }
-        sleep(1);
     }
     close(sockfd);
     fclose(log);
@@ -347,6 +436,7 @@ int main(int argc, char* argv[])
     char r;
     pthread_mutex_init(&start_lock,NULL);  
     pthread_mutex_init(&conn_lock,NULL);  
+    pthread_mutex_init(&play_lock,NULL);  
     if((r = getopt(argc, argv, "s:c:")) != -1)
     {
         switch(r)
@@ -364,5 +454,6 @@ int main(int argc, char* argv[])
     pthread_join(tid[0], NULL);
     pthread_mutex_destroy(&start_lock);  
     pthread_mutex_destroy(&conn_lock);  
+    pthread_mutex_destroy(&play_lock);  
     return 0;
 }
