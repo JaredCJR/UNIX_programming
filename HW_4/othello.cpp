@@ -12,6 +12,7 @@
 #include <arpa/inet.h> 
 #include <pthread.h>
 #include <fcntl.h>
+#include <vector>
 
 
 pthread_t tid[1];
@@ -38,6 +39,50 @@ int targetFD;
 int I_AM;
 
 char localip[] = "127.0.0.1";
+
+static void log_game()
+{
+    char buff[256];
+    FILE *log_fd = NULL;
+    if(I_AM == PLAYER2)
+    {
+        log_fd = fopen("client_log.txt","a+");
+    }else
+    {
+        log_fd = fopen("server_log.txt","a+");
+    }
+
+    if(log_fd == NULL)
+    {
+        return;
+    }
+    strcpy(buff,"\n------------------------------\n");
+    fwrite(buff, sizeof(char), 32, log_fd);
+    for(int i = 0;i < BOARDSZ; i++)
+    {
+        for(int j = 0;j < BOARDSZ; j++)
+        {
+            if(board[i][j] == PLAYER1)
+            {
+                strcpy(buff," 1 ");
+                fwrite(buff, sizeof(char), 3, log_fd);
+            }else if(board[i][j] == PLAYER2)
+            {
+                strcpy(buff," 2 ");
+                fwrite(buff, sizeof(char), 3, log_fd);
+            }else
+            {
+                strcpy(buff," _ ");
+                fwrite(buff, sizeof(char), 3, log_fd);
+            }
+        }
+        strcpy(buff,"\n");
+        fwrite(buff, sizeof(char), 1, log_fd);
+    }
+    strcpy(buff,"\n------------------------------\n");
+    fwrite(buff, sizeof(char), 32, log_fd);
+    fclose(log_fd);
+}
 
 static void sock_write(int fd,char *sendBuff)
 {
@@ -203,6 +248,7 @@ restart:
                     com_obj->player = PLAYER2;//next round is P2
                     snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER1, cx, cy);
                     sock_write(targetFD,sendBuff);
+                    log_game();
                 }
             }
             pthread_mutex_unlock(&play_lock);
@@ -222,6 +268,7 @@ restart:
                     com_obj->player = PLAYER1;//next round is P1
                     snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER2, cx, cy);
                     sock_write(targetFD,sendBuff);
+                    log_game();
                 }
             }
             pthread_mutex_unlock(&play_lock);

@@ -10,6 +10,8 @@ all: $(PROGS)
 
 gdb_client: $(PROGS)
 	gdbtui --args ./$(PROGS) -c localhost:$(P)
+gdb_server: $(PROGS)
+	gdbtui --args ./$(PROGS) -s $(P)
 
 $(PROGS): othello.o othello_lib.o
 	$(CC) -o $@ $^ $(LDFLAGS)
