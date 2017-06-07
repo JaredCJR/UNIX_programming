@@ -94,8 +94,14 @@ static void update(char *input)
     }
 }
 
-static int play_game(game_comm *com)
+static bool is_valid_loc(int player, int pos_x, int pos_y)
 {
+    return true;
+}
+
+static void *play_game(void *com)
+{
+    game_comm *com_obj = (game_comm *)com;
     int width;
     int height;
     int cx = 3;
@@ -105,7 +111,7 @@ static int play_game(game_comm *com)
     while(1)
     {
         pthread_mutex_lock(&start_lock);
-        if(com->is_start == 1)
+        if(com_obj->is_start == 1)
         {
             pthread_mutex_unlock(&start_lock);
             break;
@@ -128,8 +134,8 @@ static int play_game(game_comm *com)
 	init_colors();
 
 restart:
-    com->player = PLAYER1;
-    com->need_restart = 0;
+    com_obj->player = PLAYER1;
+    com_obj->need_restart = 0;
 	clear();
 	cx = cy = 3;
 	init_board();
@@ -144,7 +150,7 @@ restart:
 
 	while(true) {			// main loop
         pthread_mutex_lock(&conn_lock);
-        if(com->lost_con == 1)
+        if(com_obj->lost_con == 1)
         {
             pthread_mutex_unlock(&conn_lock);
             goto quit;
@@ -152,22 +158,22 @@ restart:
         pthread_mutex_unlock(&conn_lock);
         //update from sender
         pthread_mutex_lock(&play_lock);
-        if(com->need_update == 1)
+        if(com_obj->need_update == 1)
         {
-			board[com->pos_y][com->pos_x] = com->player;
-			draw_cursor(com->pos_x, com->pos_y, 1);
+			board[com_obj->pos_y][com_obj->pos_x] = com_obj->player;
+			draw_cursor(com_obj->pos_x, com_obj->pos_y, 1);
 			draw_score();
-            com->need_update = 0;
-            com->player = I_AM;
+            com_obj->need_update = 0;
+            com_obj->player = I_AM;
         }
         pthread_mutex_unlock(&play_lock);
         pthread_mutex_lock(&play_lock);
-        if(com->need_restart == 1)
+        if(com_obj->need_restart == 1)
         {
             pthread_mutex_unlock(&play_lock);
             goto restart;
         }
-        if(com->need_quit == 1)
+        if(com_obj->need_quit == 1)
         {
             pthread_mutex_unlock(&play_lock);
             goto quit;
@@ -176,7 +182,7 @@ restart:
 		int ch = getch();
 		int moved = 0;
         pthread_mutex_lock(&play_lock);
-        if(com->need_quit == 1)
+        if(com_obj->need_quit == 1)
         {
             pthread_mutex_unlock(&play_lock);
             goto quit;
@@ -186,15 +192,18 @@ restart:
 		switch(ch) {
 		case ' ':
             pthread_mutex_lock(&play_lock);
-            if((I_AM == PLAYER1) && (com->player == PLAYER1))
+            if((I_AM == PLAYER1) && (com_obj->player == PLAYER1))
             {
-			    board[cy][cx] = PLAYER1;
-			    draw_cursor(cx, cy, 1);
-			    draw_score();
+                if(is_valid_loc(PLAYER1, cx, cy))
+                {
+			        board[cy][cx] = PLAYER1;
+			        draw_cursor(cx, cy, 1);
+			        draw_score();
 
-                com->player = PLAYER2;//next round is P2
-                snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER1, cx, cy);
-                sock_write(targetFD,sendBuff);
+                    com_obj->player = PLAYER2;//next round is P2
+                    snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER1, cx, cy);
+                    sock_write(targetFD,sendBuff);
+                }
             }
             pthread_mutex_unlock(&play_lock);
 			break;
@@ -202,15 +211,18 @@ restart:
 		case 0x0a:
 		case KEY_ENTER:
             pthread_mutex_lock(&play_lock);
-            if((I_AM == PLAYER2) && (com->player == PLAYER2))
+            if((I_AM == PLAYER2) && (com_obj->player == PLAYER2))
             {
-			    board[cy][cx] = PLAYER2;
-			    draw_cursor(cx, cy, 1);
-			    draw_score();
+                if(is_valid_loc(PLAYER2, cx, cy))
+                {
+			        board[cy][cx] = PLAYER2;
+			        draw_cursor(cx, cy, 1);
+			        draw_score();
 
-                com->player = PLAYER1;//next round is P1
-                snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER2, cx, cy);
-                sock_write(targetFD,sendBuff);
+                    com_obj->player = PLAYER1;//next round is P1
+                    snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER2, cx, cy);
+                    sock_write(targetFD,sendBuff);
+                }
             }
             pthread_mutex_unlock(&play_lock);
 			break;
@@ -269,9 +281,9 @@ restart:
 	}
 
 quit:
-    com->lost_con = 1;
+    com_obj->lost_con = 1;
 	endwin();			// end curses mode
-	return 0;
+	return NULL;
 }
 
 
@@ -297,7 +309,7 @@ static int server_connect(char *p)
     printf("Waiting for a client on port %d ...\n",port);
     connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
     comm.player = PLAYER1;
-    int err = pthread_create(&tid[0], NULL, (void*)&play_game, &comm);
+    int err = pthread_create(&tid[0], NULL, &play_game, &comm);
     if (err != 0)
     {
         printf("\ncan't create thread :[%s]", strerror(err));
@@ -394,7 +406,7 @@ static int client_connect(char *d)
         return 1;
     } 
 
-    int err = pthread_create(&tid[0], NULL, (void*)&play_game, &comm);
+    int err = pthread_create(&tid[0], NULL, &play_game, &comm);
     if (err != 0)
     {
         printf("\ncan't create thread :[%s]", strerror(err));
