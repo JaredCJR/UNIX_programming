@@ -38,7 +38,31 @@ game_comm comm = { 0 };
 int targetFD;
 int I_AM;
 
-char localip[] = "127.0.0.1";
+
+static int hostname_to_ip(char * hostname , char* ip)
+{
+    struct hostent *he;
+    struct in_addr **addr_list;
+    int i;
+         
+    if ( (he = gethostbyname( hostname ) ) == NULL) 
+    {
+        // get the host info
+        herror("gethostbyname");
+        return 1;
+    }
+ 
+    addr_list = (struct in_addr **) he->h_addr_list;
+     
+    for(i = 0; addr_list[i] != NULL; i++) 
+    {
+        //Return the first one;
+        strcpy(ip , inet_ntoa(*addr_list[i]) );
+        return 0;
+    }
+     
+    return 1;
+}
 
 static void log_game()
 {
@@ -425,10 +449,6 @@ static int client_connect(char *d)
     char *ip, *port_ch;
     uint32_t port;
     ip = strtok (d,":");
-    if(strcmp(ip,"localhost") == 0)
-    {
-        ip = localip;
-    }
     port_ch = strtok (NULL, ":");
     sscanf(port_ch, "%d", &port);
 
@@ -449,8 +469,17 @@ static int client_connect(char *d)
 
     if(inet_pton(AF_INET, ip, &serv_addr.sin_addr)<=0)
     {
-        printf("\n inet_pton error occured\n");
-        return 1;
+        char converted_ip[32];
+        if(hostname_to_ip(ip, converted_ip))
+        {
+            printf("\n inet_pton error occured\n");
+        }
+        printf("ip=%s\n", converted_ip);
+        if(inet_pton(AF_INET, converted_ip, &serv_addr.sin_addr)<=0)
+        {
+            printf("\n inet_pton error occured\n");
+            return 1;
+        }
     } 
 
     int err = pthread_create(&tid[0], NULL, &play_game, &comm);
