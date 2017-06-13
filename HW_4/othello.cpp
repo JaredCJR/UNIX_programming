@@ -163,9 +163,90 @@ static void update(char *input)
     }
 }
 
-static bool is_valid_loc(int player, int pos_x, int pos_y)
+static bool is_valid_loc(int player, int target_x, int target_y)
 {
-    return true;
+    int target;
+    std::vector<std::pair<int,int> > valid_loc;
+    if(player == PLAYER1)
+    {
+        target = PLAYER2;
+    }else
+    {
+        target = PLAYER1;
+    }
+    for(int pos_x = 0; pos_x < BOARDSZ; pos_x++)
+    {
+        for(int pos_y = 0; pos_y < BOARDSZ; pos_y++)
+        {
+            if(board[pos_y][pos_x] == player)
+            {
+                for(int x_step = -1; x_step <= 1; x_step++)
+                {
+                    for(int y_step = -1; y_step <= 1; y_step++)
+                    {
+                        if((x_step == 0) && (y_step == 0))
+                        {
+                            continue;
+                        }
+                        bool is_candidate = false;
+                        int new_x = pos_x + x_step;
+                        int new_y = pos_y + y_step;
+                        while((new_y >= 0) && (new_y < BOARDSZ) &&
+                              (new_x >= 0) && (new_x < BOARDSZ))
+                        {
+                            if(board[new_y][new_x] == target)
+                            {
+                                new_x = new_x + x_step;
+                                new_y = new_y + y_step;
+                                is_candidate = true;
+                                continue;
+                            }
+                            if((board[new_y][new_x] == 0) && is_candidate)
+                            {
+                                valid_loc.push_back(std::make_pair(new_x, new_y));
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    //log start
+    char buff[256];
+    FILE *log_fd = NULL;
+    if(I_AM == PLAYER2)
+    {
+        log_fd = fopen("client_log.txt","a+");
+    }else
+    {
+        log_fd = fopen("server_log.txt","a+");
+    }
+
+    if(log_fd == NULL)
+    {
+        return false;
+    }
+    strcpy(buff,"\n------------------------------\n");
+    fwrite(buff, sizeof(char), 32, log_fd);
+    for(uint32_t i = 0;i < valid_loc.size();i++)
+    {
+        memset(buff, 0, sizeof(buff));
+        snprintf(buff,sizeof(buff),"valid : (%d,%d)\n",valid_loc[i].first,valid_loc[i].second);
+        fwrite(buff, sizeof(char), 32, log_fd);
+    }
+    strcpy(buff,"\n------------------------------\n");
+    fwrite(buff, sizeof(char), 32, log_fd);
+    fclose(log_fd);
+    //end log
+    for(uint32_t i = 0;i < sizeof(valid_loc);i++)
+    {
+        if((valid_loc[i].first == target_x) && (valid_loc[i].second == target_y))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void *play_game(void *com)
@@ -214,6 +295,15 @@ restart:
 	refresh();
 
 	attron(A_BOLD);
+    if(I_AM == PLAYER1)
+    {
+	    move(0, 0);
+        printw("Player #1 ");   
+    }else
+    {
+	    move(0, 0);
+        printw("Player #2 ");
+    }
 	move(height-1, 0);	printw("Arrow keys: move; Space: put GREEN; Return: put PURPLE; R: reset; Q: quit");
 	attroff(A_BOLD);
 

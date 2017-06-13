@@ -19,7 +19,14 @@ static int colormsgok;
 
 void
 init_board() {
-	bzero(board, sizeof(board));
+	//bzero(board, sizeof(board));
+    for(int x = 0;x < BOARDSZ;x++)
+    {
+        for(int y = 0;y < BOARDSZ;y++)
+        {
+            board[y][x] = 0;
+        }
+    }
 	board[3][3] = board[4][4] = PLAYER1;
 	board[3][4] = board[4][3] = PLAYER2;
 }
