@@ -12,6 +12,8 @@
 #define	PLAYER2		-1
 
 extern int board[BOARDSZ][BOARDSZ];
+int const box_top = 1; 
+int const box_left = 2;
 
 void init_board();
 void init_colors();

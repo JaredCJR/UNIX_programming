@@ -20,6 +20,7 @@ pthread_mutex_t start_lock;
 pthread_mutex_t conn_lock;
 pthread_mutex_t play_lock;
 #define MAGIC    "9487"
+#define MAGIC_SKIP    "9487_SKIP"
 #define RESTART_MAGIC  "94_RESTART"
 #define QUIT_MAGIC   "94_QUIT"
 
@@ -145,6 +146,12 @@ static void update(char *input)
         pthread_mutex_lock(&play_lock);
         comm.need_quit = 1;
         pthread_mutex_unlock(&play_lock);
+    }else if(strcmp(magic, MAGIC_SKIP) == 0)
+    {
+        pthread_mutex_lock(&play_lock);
+        player = strtok (NULL, deli);
+        sscanf(player, "%d", &comm.player);
+        pthread_mutex_unlock(&play_lock);
     }else if(strcmp(magic,MAGIC) == 0)
     {
         player = strtok (NULL, deli);
@@ -163,17 +170,8 @@ static void update(char *input)
     }
 }
 
-static bool is_valid_loc(int player, int target_x, int target_y)
+static void get_valid_loc(int player, int target, std::vector<std::pair<int,int> > *valid_loc)
 {
-    int target;
-    std::vector<std::pair<int,int> > valid_loc;
-    if(player == PLAYER1)
-    {
-        target = PLAYER2;
-    }else
-    {
-        target = PLAYER1;
-    }
     for(int pos_x = 0; pos_x < BOARDSZ; pos_x++)
     {
         for(int pos_y = 0; pos_y < BOARDSZ; pos_y++)
@@ -203,7 +201,7 @@ static bool is_valid_loc(int player, int target_x, int target_y)
                             }
                             if((board[new_y][new_x] == 0) && is_candidate)
                             {
-                                valid_loc.push_back(std::make_pair(new_x, new_y));
+                                valid_loc->push_back(std::make_pair(new_x, new_y));
                             }
                             break;
                         }
@@ -212,6 +210,53 @@ static bool is_valid_loc(int player, int target_x, int target_y)
             }
         }
     }
+}
+
+static bool is_time_to_end()
+{
+    std::vector<std::pair<int,int> > valid_loc_1;
+    std::vector<std::pair<int,int> > valid_loc_2;
+    get_valid_loc(PLAYER1, PLAYER2, &valid_loc_1);
+    get_valid_loc(PLAYER2, PLAYER1, &valid_loc_2);
+    if(valid_loc_1.empty() && valid_loc_2.empty())
+    {
+        return true;
+    }
+    return false;
+}
+
+static bool is_my_turn_valid()
+{
+    int target;
+    std::vector<std::pair<int,int> > valid_loc;
+    if(I_AM == PLAYER1)
+    {
+        target = PLAYER2;
+    }else
+    {
+        target = PLAYER1;
+    }
+    get_valid_loc(I_AM, target, &valid_loc);
+    if(valid_loc.empty())
+    {
+        return false;
+    }
+    return true;
+}
+
+static bool is_valid_loc(int player, int target_x, int target_y)
+{
+    int target;
+    std::vector<std::pair<int,int> > valid_loc;
+    if(player == PLAYER1)
+    {
+        target = PLAYER2;
+    }else
+    {
+        target = PLAYER1;
+    }
+    get_valid_loc(player, target, &valid_loc);
+
     //log start
     char buff[256];
     FILE *log_fd = NULL;
@@ -239,7 +284,7 @@ static bool is_valid_loc(int player, int target_x, int target_y)
     fwrite(buff, sizeof(char), 32, log_fd);
     fclose(log_fd);
     //end log
-    for(uint32_t i = 0;i < sizeof(valid_loc);i++)
+    for(uint32_t i = 0;i < valid_loc.size();i++)
     {
         if((valid_loc[i].first == target_x) && (valid_loc[i].second == target_y))
         {
@@ -252,7 +297,6 @@ static bool is_valid_loc(int player, int target_x, int target_y)
 static void adjust_game(int player, int target_x, int target_y)
 {
     int target;
-    std::vector<std::pair<int,int> > valid_loc;
     if(player == PLAYER1)
     {
         target = PLAYER2;
@@ -340,15 +384,6 @@ restart:
 	refresh();
 
 	attron(A_BOLD);
-    if(I_AM == PLAYER1)
-    {
-	    move(0, 0);
-        printw("Player #1 ");   
-    }else
-    {
-	    move(0, 0);
-        printw("Player #2 ");
-    }
 	move(height-1, 0);	printw("Arrow keys: move; Space: put GREEN; Return: put PURPLE; R: reset; Q: quit");
 	attroff(A_BOLD);
 
@@ -385,8 +420,6 @@ restart:
             goto quit;
         }
         pthread_mutex_unlock(&play_lock);
-		int ch = getch();
-		int moved = 0;
         pthread_mutex_lock(&play_lock);
         if(com_obj->need_quit == 1)
         {
@@ -394,6 +427,81 @@ restart:
             goto quit;
         }
         pthread_mutex_unlock(&play_lock);
+        if(is_time_to_end())
+        {
+            int black = 0, white = 0;    
+            for(int i = 0; i < BOARDSZ; i++) {
+                for(int j = 0; j < BOARDSZ; j++) {
+                    if(board[i][j] == PLAYER1) white++;
+                    if(board[i][j] == PLAYER2) black++;
+                }
+            }
+	        move(box_top + 7, box_left + 4*BOARDSZ + 10);
+            if( white > black)
+            {
+                //PLAYER 1 wins
+                if(I_AM == PLAYER1)
+                {
+                    printw("You WIN !!!");   
+                }else
+                {
+                    printw("You LOSS !!!");   
+                }
+            }else if(white == black)
+            {
+                //tie
+                printw("TIE !!!");   
+            }else
+            {
+                //PLAYER 1 loss
+                if(I_AM == PLAYER1)
+                {
+                    printw("You LOSS !!!");   
+                }else
+                {
+                    printw("You WIN !!!");   
+                }
+            }
+	        move(0, 0);
+            printw("********* See Score board for who wins the game *********");   
+        }else if((!is_my_turn_valid()) && (com_obj->player == I_AM))
+        {
+            int next = 0;
+            if(I_AM == PLAYER1)
+            {
+                next = PLAYER2;
+            }else
+            {
+                next = PLAYER1;
+            }
+            pthread_mutex_lock(&play_lock);
+            com_obj->player = next;//next round is who
+            snprintf(sendBuff, sizeof(sendBuff), "%s, %d\n", MAGIC_SKIP, next);//pass who is next round
+            sock_write(targetFD,sendBuff);
+            pthread_mutex_unlock(&play_lock);
+            continue;
+        }else
+        {
+	        move(0, 0);
+            if(I_AM == PLAYER1)
+            {
+                printw("Player #1 ");   
+            }else
+            {
+	            move(0, 0);
+                printw("Player #2 ");
+            }
+	        move(0, 10);
+            if(com_obj->player == I_AM)
+            {
+                printw(", It's your turn!!");   
+            }else
+            {
+                printw(", Wait for peer...");   
+            }
+        }
+		int ch = getch();
+		int moved = 0;
 
 		switch(ch) {
 		case ' ':

@@ -5,8 +5,6 @@
 
 int board[BOARDSZ][BOARDSZ];
 
-static int const box_top = 1;
-static int const box_left = 2;
 static int const boxwidth = 3;
 
 static int use_color = 0;
