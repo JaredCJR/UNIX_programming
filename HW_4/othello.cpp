@@ -249,6 +249,51 @@ static bool is_valid_loc(int player, int target_x, int target_y)
     return false;
 }
 
+static void adjust_game(int player, int target_x, int target_y)
+{
+    int target;
+    std::vector<std::pair<int,int> > valid_loc;
+    if(player == PLAYER1)
+    {
+        target = PLAYER2;
+    }else
+    {
+        target = PLAYER1;
+    }
+    for(int x_step = -1; x_step <= 1; x_step++)
+    {
+        for(int y_step = -1; y_step <= 1; y_step++)
+        {
+            if((x_step == 0) && (y_step == 0))
+            {
+                continue;
+            }
+            int new_x = target_x + x_step;
+            int new_y = target_y + y_step;
+            while((new_y >= 0) && (new_y < BOARDSZ) &&
+                  (new_x >= 0) && (new_x < BOARDSZ))
+            {
+                if(board[new_y][new_x] == target)
+                {
+                    new_x = new_x + x_step;
+                    new_y = new_y + y_step;
+                    continue;
+                }else if(board[new_y][new_x] == player)
+                {
+                    for(;(new_x != target_x) || (new_y != target_y);new_x -= x_step, new_y -= y_step)//update based on the rule
+                    {
+                        board[new_y][new_x] = player;
+			            draw_cursor(new_x, new_y, 0);
+			            draw_score();
+                    }
+                }
+                break;
+            }
+        }
+    }
+    refresh();
+}
+
 static void *play_game(void *com)
 {
     game_comm *com_obj = (game_comm *)com;
@@ -322,6 +367,8 @@ restart:
 			board[com_obj->pos_y][com_obj->pos_x] = com_obj->player;
 			draw_cursor(com_obj->pos_x, com_obj->pos_y, 1);
 			draw_score();
+            //based on the rules
+            adjust_game(com_obj->player, com_obj->pos_x, com_obj->pos_y);
             com_obj->need_update = 0;
             com_obj->player = I_AM;
         }
@@ -358,6 +405,8 @@ restart:
 			        board[cy][cx] = PLAYER1;
 			        draw_cursor(cx, cy, 1);
 			        draw_score();
+                    //based on the rules
+                    adjust_game(PLAYER1, cx, cy);
 
                     com_obj->player = PLAYER2;//next round is P2
                     snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER1, cx, cy);
@@ -378,6 +427,8 @@ restart:
 			        board[cy][cx] = PLAYER2;
 			        draw_cursor(cx, cy, 1);
 			        draw_score();
+                    //based on the rules
+                    adjust_game(PLAYER2, cx, cy);
 
                     com_obj->player = PLAYER1;//next round is P1
                     snprintf(sendBuff, sizeof(sendBuff), "%s,%d,%d,%d\n", MAGIC, PLAYER2, cx, cy);
@@ -498,12 +549,6 @@ static int server_connect(char *p)
             break;
         }
 
-        //write
-        /*
-        snprintf(sendBuff, sizeof(sendBuff), "%s", "ack from server\n");
-        sock_write(connfd,sendBuff);
-        */
-
         //read
         count = read(connfd, recvBuff, sizeof(recvBuff)-1);
         if(count < 0 && errno == EAGAIN) {
@@ -580,7 +625,9 @@ static int client_connect(char *d)
 
     if( connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
-       perror("Connect Failed ");
+       perror("Connect Failed, please use a new port ");
+       fprintf(stderr,"exit the othello automatically\n");
+       exit(EXIT_FAILURE);
        return 1;
     }
 
@@ -606,12 +653,6 @@ static int client_connect(char *d)
         {
             break;
         }
-
-        //write
-        /*
-        snprintf(sendBuff, sizeof(sendBuff), "%s", "ack from client\n");
-        sock_write(sockfd,sendBuff);
-        */
 
         //read
         count = read(sockfd, recvBuff, sizeof(recvBuff)-1);

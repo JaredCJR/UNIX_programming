@@ -115,6 +115,7 @@ draw_cursor(int x, int y, int show) {
 	return;
 }
 
+
 void
 draw_board() {
 	int i, j;
